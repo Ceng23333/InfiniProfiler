@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://infiniprofiler.dev/schemas/promotion-request-1.json",
+  "title": "Deterministic AutoHelix measure request",
+  "type": "object",
+  "required": ["schema_version", "controller", "stop_before_promote", "campaign", "observation", "gate", "diagnosis", "promote"],
+  "properties": {
+    "schema_version": {"const": "promotion-request-1"},
+    "controller": {"const": "autohelix"},
+    "stop_before_promote": {"const": true},
+    "campaign": {"type": "object"},
+    "observation": {"type": "object"},
+    "gate": {
+      "type": "object",
+      "required": ["metric", "surpass_threshold", "profiled_result_can_promote"],
+      "properties": {
+        "metric": {"const": "unprofiled_primary_wall"},
+        "surpass_threshold": {"type": "number"},
+        "profiled_result_can_promote": {"const": false}
+      }
+    },
+    "diagnosis": {
+      "type": "object",
+      "required": ["top_path", "ranked"],
+      "properties": {
+        "top_path": {"type": "string"},
+        "ranked": {"type": "array", "minItems": 1}
+      }
+    },
+    "promote": {
+      "type": "object",
+      "required": ["one_path", "may_apply", "must_reobserve_unprofiled"],
+      "properties": {
+        "one_path": {"type": "string"},
+        "may_apply": {"const": false},
+        "must_reobserve_unprofiled": {"const": true}
+      }
+    }
+  }
+}

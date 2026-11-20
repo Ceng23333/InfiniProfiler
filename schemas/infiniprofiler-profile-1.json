@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://infiniprofiler.dev/schemas/infiniprofiler-profile-1.json",
+  "title": "InfiniProfiler normalized profile",
+  "type": "object",
+  "required": ["schema_version", "capture", "host_signals", "scheduler_signals", "metrics", "warnings"],
+  "properties": {
+    "schema_version": {"const": "infiniprofiler-profile-1"},
+    "capture": {"$ref": "#/$defs/capture"},
+    "host_signals": {"type": "array", "items": {"$ref": "#/$defs/hostSignal"}},
+    "scheduler_signals": {"type": "array", "items": {"$ref": "#/$defs/schedulerSignal"}},
+    "metrics": {"type": "array", "items": {"$ref": "#/$defs/engineMetric"}},
+    "warnings": {"type": "array", "items": {"type": "string"}}
+  },
+  "$defs": {
+    "capture": {
+      "type": "object",
+      "required": ["source", "mode", "provenance"],
+      "properties": {
+        "source": {"type": "string"},
+        "mode": {"type": "string"},
+        "pid": {"type": ["integer", "null"]},
+        "ranks": {"type": "array", "items": {"type": "integer"}},
+        "started_at": {"type": ["string", "null"]},
+        "ended_at": {"type": ["string", "null"]},
+        "provenance": {"type": "object"}
+      }
+    },
+    "hostSignal": {
+      "type": "object",
+      "required": ["family", "candidate", "source"],
+      "properties": {
+        "family": {"enum": ["api", "command", "driver", "runtime", "gap", "graph"]},
+        "candidate": {"type": "number", "minimum": 0},
+        "baseline": {"type": "number", "minimum": 0},
+        "ratio": {"type": "number", "exclusiveMinimum": 0},
+        "unit": {"type": "string"},
+        "source": {"type": "string"},
+        "note": {"type": ["string", "null"]}
+      }
+    },
+    "schedulerSignal": {
+      "type": "object",
+      "required": ["family", "name", "candidate_us", "count", "source"],
+      "properties": {
+        "family": {"enum": ["step_control", "batch_packing", "queue_admission"]},
+        "name": {"type": "string"},
+        "candidate_us": {"type": "number", "minimum": 0},
+        "baseline_us": {"type": "number", "minimum": 0},
+        "ratio": {"type": "number", "exclusiveMinimum": 0},
+        "count": {"type": "integer", "minimum": 1},
+        "source": {"type": "string"},
+        "ranks": {"type": "array", "items": {"type": "integer", "minimum": 0}},
+        "sample": {"type": "object"}
+      }
+    },
+    "engineMetric": {
+      "type": "object",
+      "required": ["name", "source"],
+      "properties": {
+        "name": {"type": "string"},
+        "candidate": {"type": "number"},
+        "baseline": {"type": "number"},
+        "ratio": {"type": "number"},
+        "unit": {"type": "string"},
+        "source": {"type": "string"}
+      }
+    }
+  }
+}
