@@ -1,7 +1,7 @@
 import json
 
 import pytest
-from infiniprofiler.tools.process_sampler import _parse_status
+from infiniprofiler.tools.process_sampler import _parse_status, _parse_stat_task
 from infiniprofiler.tools import process_sampler
 
 from infiniprofiler.cli import main
@@ -84,3 +84,20 @@ def test_clock_ticks_configuration_name_is_supported_on_linux():
     if not process_sampler.Path("/proc").exists():
         return
     assert process_sampler.os.sysconf("SC_CLK_TCK") > 0
+
+
+def test_stat_task_parser_preserves_numeric_tid(tmp_path):
+    stat = tmp_path / "stat"
+    fields = ["1"] * 37
+    fields[11] = "14"
+    fields[12] = "15"
+    fields[17] = "4"
+    stat.write_text("42 (python3) " + " ".join(fields) + "\n", encoding="utf-8")
+    parsed = _parse_stat_task(stat)
+
+    assert parsed is not None
+    tid, values = parsed
+    assert tid == "42"
+    assert values["utime"] == 14
+    assert values["stime"] == 15
+    assert values["num_threads"] == 4

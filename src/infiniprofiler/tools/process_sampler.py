@@ -56,8 +56,9 @@ def _parse_stat_task(path: Path) -> Optional[Tuple[str, Dict[str, int]]]:
         text = path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return None
+    comm_start = text.find("(")
     comm_end = text.rfind(")")
-    if comm_end < 0:
+    if comm_start < 0 or comm_end <= comm_start:
         return None
     fields = text[comm_end + 2 :].split()
     if len(fields) < 36:
@@ -68,7 +69,7 @@ def _parse_stat_task(path: Path) -> Optional[Tuple[str, Dict[str, int]]]:
         # because pid and comm (with parentheses) were removed above.
         return int(fields[number - 3])
 
-    return text[1:comm_end], {
+    return text[:comm_start].strip(), {
         "utime": field(14),
         "stime": field(15),
         "num_threads": field(20),
