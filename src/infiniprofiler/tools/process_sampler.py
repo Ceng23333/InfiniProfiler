@@ -101,7 +101,7 @@ def sample_interval(
     """Sample CPU deltas for one process and emit one row per interval."""
     if duration_s <= 0 or interval_s <= 0:
         raise ValueError("duration_s and interval_s must be positive")
-    clock_ticks = os.sysconf("sc_clk_tck")
+    clock_ticks = os.sysconf("SC_CLK_TCK")
     rows: List[Dict[str, float]] = []
     deadline = time.monotonic() + duration_s
     previous = sample_process(pid)

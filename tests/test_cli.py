@@ -2,6 +2,7 @@ import json
 
 import pytest
 from infiniprofiler.tools.process_sampler import _parse_status
+from infiniprofiler.tools import process_sampler
 
 from infiniprofiler.cli import main
 
@@ -77,3 +78,9 @@ def test_status_context_switch_parser(tmp_path):
         encoding="utf-8",
     )
     assert _parse_status(status) == (12, 3)
+
+
+def test_clock_ticks_configuration_name_is_supported_on_linux():
+    if not process_sampler.Path("/proc").exists():
+        return
+    assert process_sampler.os.sysconf("SC_CLK_TCK") > 0
