@@ -5,6 +5,7 @@ from infiniprofiler.tools.process_sampler import _parse_status, _parse_stat_task
 from infiniprofiler.tools import process_sampler
 
 from infiniprofiler.cli import main
+from tests.test_contracts import valid_profile, valid_request
 
 
 def test_cli_normalizes_and_validates_sidecar(tmp_path, capsys):
@@ -46,6 +47,36 @@ def test_cli_normalizes_and_validates_sidecar(tmp_path, capsys):
     assert main(["validate", "--input", str(output)]) == 0
     document = json.loads(output.read_text(encoding="utf-8"))
     assert document["schema_version"] == "infiniprofiler-profile-1"
+
+
+def test_cli_detects_and_validates_profile_v2(tmp_path, capsys):
+    path = tmp_path / "profile-v2.json"
+    path.write_text(json.dumps(valid_profile()), encoding="utf-8")
+
+    assert main(["validate", "--input", str(path)]) == 0
+    captured = capsys.readouterr().out
+    assert '"schema_version": "infiniprofiler-profile-2"' in captured
+    assert '"alignment": "MATCHED"' in captured
+
+
+def test_cli_detects_and_validates_promotion_request_v2(tmp_path, capsys):
+    path = tmp_path / "request-v2.json"
+    path.write_text(json.dumps(valid_request()), encoding="utf-8")
+
+    assert main(["validate", "--kind", "promotion-request", "--input", str(path)]) == 0
+    assert '"top_path": "graph.source_guard"' in capsys.readouterr().out
+
+
+def test_cli_reports_contract_errors_without_traceback(tmp_path, capsys):
+    path = tmp_path / "invalid.json"
+    document = valid_profile()
+    document["window"]["alignment"] = "UNMATCHED"
+    path.write_text(json.dumps(document), encoding="utf-8")
+
+    assert main(["validate", "--input", str(path)]) == 2
+    captured = capsys.readouterr()
+    assert "alignment must be MATCHED" in captured.err
+    assert "Traceback" not in captured.err
 
 
 def test_sample_process_requires_one_target(tmp_path):

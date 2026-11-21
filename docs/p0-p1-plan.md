@@ -368,7 +368,7 @@ record contains both mechanism check and unprofiled wall result.
 
 | Milestone | Deliverable | Gate |
 |---|---|---|
-| P0-A | Profile/request v2 schemas and validation fixtures | Invalid window or missing lever contract rejected |
+| P0-A | Profile/request v2 schemas and validation fixtures (**done**) | Invalid window or missing lever contract rejected by `infiniprofiler validate` |
 | P0-B | Matched multi-rank wrapper and manifest merge | Two-rank capture aligns and failed rank aborts cleanly |
 | P0-C | Streaming parser and interval engine | Exclusive time fixtures pass on synthetic traces |
 | P0-D | Rank merge and TP imbalance facts | Synthetic straggler is reported separately |

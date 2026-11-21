@@ -42,6 +42,9 @@ python -m infiniprofiler promotion-request \
 
 python -m infiniprofiler io-compat \
   --profile profile.json --out-dir profile/iteration-0
+
+python -m infiniprofiler validate --input profile.json
+python -m infiniprofiler validate --kind promotion-request --input request.json
 ```
 
 `promotion-request` stops after producing facts and the selected lever. It

@@ -8,6 +8,13 @@ import sys
 from pathlib import Path
 from typing import Optional, Sequence
 
+from .contracts import (
+    PROFILE_SCHEMA,
+    REQUEST_SCHEMA,
+    ContractValidationError,
+    validate_profile_v2,
+    validate_promotion_request_v2,
+)
 from .adapters.hctracer import normalize as normalize_hctracer
 from .models import ProfileDocument
 from .promotion.autohelix import promotion_request, write_io_compat
@@ -66,8 +73,13 @@ def build_parser() -> argparse.ArgumentParser:
     io_compat.add_argument("--out-dir", type=Path, required=True)
     io_compat.add_argument("--exhausted", default="")
 
-    validate = subparsers.add_parser("validate", help="validate a normalized profile")
+    validate = subparsers.add_parser("validate", help="validate a normalized profile or request")
     validate.add_argument("--input", type=Path, required=True)
+    validate.add_argument(
+        "--kind",
+        choices=["auto", "profile", "promotion-request"],
+        default="auto",
+    )
     return parser
 
 
@@ -180,20 +192,58 @@ def run_io_compat(args: argparse.Namespace) -> int:
 
 
 def run_validate(args: argparse.Namespace) -> int:
-    profile = _load_profile(args.input)
-    print(
-        json.dumps(
-            {
+    raw = _load_json(args.input)
+    kind = args.kind
+    schema = str(raw.get("schema_version", ""))
+    if kind == "auto":
+        if schema == PROFILE_SCHEMA:
+            kind = "profile"
+        elif schema == REQUEST_SCHEMA:
+            kind = "promotion-request"
+        else:
+            kind = "profile"
+
+    if kind == "promotion-request":
+        if schema not in ("promotion-request-1", REQUEST_SCHEMA):
+            raise ValueError(f"unsupported promotion request schema_version: {schema}")
+        if schema == REQUEST_SCHEMA:
+            validate_promotion_request_v2(raw)
+        summary = {
+            "schema_version": schema,
+            "kind": "promotion-request",
+            "top_path": raw.get("diagnosis", {}).get("top_path"),
+            "stop_before_promote": raw.get("stop_before_promote"),
+            "mechanism_status": raw.get("mechanism_check", {}).get("status", "NOT_RUN"),
+        }
+    else:
+        if schema == PROFILE_SCHEMA:
+            profile = validate_profile_v2(raw)
+            summary = {
+                "schema_version": PROFILE_SCHEMA,
+                "kind": "profile",
+                "source": profile.capture.source,
+                "window_id": profile.window.window_id,
+                "alignment": profile.window.alignment,
+                "campaign_id": profile.workload.campaign_id,
+                "ranks": len(profile.ranks),
+                "unpaired_events": profile.timing.unpaired_event_count,
+                "scheduler_signals": len(profile.scheduler_signals),
+                "warnings": profile.warnings,
+            }
+        elif schema == "infiniprofiler-profile-1":
+            profile = _load_profile(args.input)
+            summary = {
                 "schema_version": profile.schema_version,
+                "kind": "profile",
                 "source": profile.capture.source,
                 "host_signals": len(profile.host_signals),
                 "scheduler_signals": len(profile.scheduler_signals),
                 "metrics": len(profile.metrics),
                 "warnings": profile.warnings,
-            },
-            indent=2,
-        )
-    )
+            }
+        else:
+            raise ValueError(f"unsupported profile schema_version: {schema}")
+    print(json.dumps(summary, indent=2))
     return 0
 
 
@@ -207,4 +257,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "io-compat": run_io_compat,
         "validate": run_validate,
     }
-    return handlers[args.command](args)
+    try:
+        return handlers[args.command](args)
+    except ContractValidationError as exc:
+        for error in exc.errors:
+            print(f"contract error: {error}", file=sys.stderr)
+        return 2
