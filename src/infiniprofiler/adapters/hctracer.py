@@ -120,7 +120,7 @@ def extract_host_totals_us(doc: Dict[str, Any]) -> Dict[str, float]:
     return totals
 
 
-def extract_scheduler_signals(doc: Dict[str, Any]) -> List[SchedulerSignal]:
+def _scheduler_span_totals(doc: Dict[str, Any]) -> Tuple[Dict[Tuple[str, str], Dict[str, float]], Dict[Tuple[str, str], Set[int]]]:
     spans: Dict[Tuple[str, str], Dict[str, float]] = {}
     ranks: Dict[Tuple[str, str], Set[int]] = {}
     for event in _events(doc):
@@ -146,15 +146,31 @@ def extract_scheduler_signals(doc: Dict[str, Any]) -> List[SchedulerSignal]:
         if rank is not None:
             ranks.setdefault(key, set()).add(int(rank))
 
+    return spans, ranks
+
+
+def extract_scheduler_signals(
+    doc: Dict[str, Any],
+    baseline_spans: Optional[Dict[Tuple[str, str], Dict[str, float]]] = None,
+) -> List[SchedulerSignal]:
+    spans, ranks = _scheduler_span_totals(doc)
+
     output: List[SchedulerSignal] = []
     for (family, name), item in sorted(spans.items()):
         count = int(item["count"])
+        baseline_us = (
+            float(baseline_spans[(family, name)]["total_us"])
+            if baseline_spans and (family, name) in baseline_spans
+            else None
+        )
         output.append(
             SchedulerSignal(
                 family=family,
                 name=name,
                 candidate_us=item["total_us"],
                 count=count,
+                baseline_us=baseline_us,
+                ratio=safe_ratio(item["total_us"], baseline_us) if baseline_us else None,
                 source="hctracer.marker",
                 ranks=sorted(ranks.get((family, name), set())),
                 sample={
@@ -199,18 +215,20 @@ def normalize(
 ) -> ProfileDocument:
     doc, warnings = load_chrome_trace(input_path)
     totals = extract_host_totals_us(doc)
-    scheduler = extract_scheduler_signals(doc)
+    baseline_totals = None
+    baseline_scheduler_spans = None
+    if baseline_path is not None:
+        baseline_doc, baseline_warnings = load_chrome_trace(baseline_path)
+        baseline_totals = extract_host_totals_us(baseline_doc)
+        baseline_scheduler_spans, _ = _scheduler_span_totals(baseline_doc)
+        warnings.extend("baseline:" + item for item in baseline_warnings)
+
+    scheduler = extract_scheduler_signals(doc, baseline_scheduler_spans)
     if not scheduler:
         warnings.append(
             "no_scheduler_annotations: the trace has no HCTX/marker ranges; "
             "host gaps are not scheduler evidence"
         )
-
-    baseline_totals = None
-    if baseline_path is not None:
-        baseline_doc, baseline_warnings = load_chrome_trace(baseline_path)
-        baseline_totals = extract_host_totals_us(baseline_doc)
-        warnings.extend("baseline:" + item for item in baseline_warnings)
 
     capture = Capture(
         source=source_name,

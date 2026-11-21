@@ -114,4 +114,5 @@ def test_io_compat_preserves_host_family_shape(tmp_path):
 def test_primary_wall_ratio_reads_common_shapes():
     assert primary_wall_ratio({"ratio": 0.7}) == 0.7
     assert primary_wall_ratio({"WALL_DECODE_RATIO": 0.8}) == 0.8
+    assert primary_wall_ratio({"tok_s_ratio": 0.9}) == 0.9
     assert primary_wall_ratio({"walls": [{"ratio": 1.1}, {"ratio": 0.2, "primary": True}]}) == 0.2

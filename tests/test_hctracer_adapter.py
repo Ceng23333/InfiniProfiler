@@ -58,6 +58,24 @@ def test_does_not_invent_scheduler_ranges_when_markers_absent(tmp_path):
     assert any("no_scheduler_annotations" in warning for warning in profile.warnings)
 
 
+def test_compares_matching_scheduler_markers(tmp_path):
+    baseline = write(
+        tmp_path,
+        "baseline.json",
+        trace([{"ph": "X", "name": "scheduler.step", "dur": 20}]),
+    )
+    candidate = write(
+        tmp_path,
+        "candidate.json",
+        trace([{"ph": "X", "name": "scheduler.step", "dur": 40}]),
+    )
+    profile = normalize(candidate, baseline_path=baseline)
+    signal = profile.scheduler("step_control")
+
+    assert signal.baseline_us == 20
+    assert signal.ratio == 2.0
+
+
 def test_recovers_truncated_chrome_trace(tmp_path):
     complete = '{"traceEvents": [{"ph": "X", "name": "hcLaunchKernel", "dur": 20}'
     path = write(tmp_path, "truncated.json", complete)
