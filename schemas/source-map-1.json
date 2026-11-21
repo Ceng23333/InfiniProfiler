@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://infiniprofiler.dev/schemas/source-map-1.json",
+  "title": "Engine-neutral promotion source map",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "source_pin",
+    "source_root",
+    "source_root_hash",
+    "scanned_file_count",
+    "symbols",
+    "providers",
+    "artifacts",
+    "rules"
+  ],
+  "properties": {
+    "schema_version": {"const": "source-map-1"},
+    "source_pin": {"type": "string", "minLength": 1},
+    "source_root": {"type": "string", "minLength": 1},
+    "source_root_hash": {"type": "string", "minLength": 1},
+    "scanned_file_count": {"type": "integer", "minimum": 0},
+    "symbols": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["symbol", "file", "line_start", "kind", "match"],
+        "properties": {
+          "symbol": {"type": "string", "minLength": 1},
+          "file": {"type": "string", "minLength": 1},
+          "line_start": {"type": "integer", "minimum": 1},
+          "kind": {"type": "string"},
+          "match": {"type": "string"}
+        }
+      }
+    },
+    "providers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["provider", "patterns", "files", "matches"],
+        "properties": {
+          "provider": {"type": "string", "minLength": 1},
+          "patterns": {"type": "array", "items": {"type": "string"}},
+          "files": {"type": "array", "items": {"type": "string"}},
+          "matches": {"type": "array", "items": {"type": "object"}}
+        }
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["kind", "patterns", "files", "matches"],
+        "properties": {
+          "kind": {"type": "string"},
+          "patterns": {"type": "array", "items": {"type": "string"}},
+          "files": {"type": "array", "items": {"type": "string"}},
+          "matches": {"type": "array", "items": {"type": "object"}}
+        }
+      }
+    },
+    "rules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["kind", "patterns"],
+        "properties": {
+          "kind": {"type": "string"},
+          "patterns": {"type": "array", "items": {"type": "string"}},
+          "provider": {"type": "string"}
+        }
+      }
+    }
+  }
+}

@@ -57,6 +57,13 @@ python -m infiniprofiler compare-capture-manifests \
 python -m infiniprofiler merge-capture --capture-dir profile/candidate/window0
 python -m infiniprofiler rank-capture --capture-dir profile/candidate/window0
 
+python -m infiniprofiler build-source-map \
+  --source-root /path/to/engine \
+  --source-pin engine-candidate \
+  --rules examples/source-map-rules.json \
+  --required-symbol 'Provider::supports_graph_capture' \
+  --output source-map.json
+
 python -m infiniprofiler attribute-trace \
   --input trace.json --output timing.json
 ```
@@ -72,4 +79,5 @@ pytest
 ```
 
 The Python implementation has no third-party runtime dependencies; timeline
-staging uses Python's built-in sqlite3 module.
+staging uses Python's built-in sqlite3 module. Engine-specific source symbols
+are campaign configuration, not core assumptions.

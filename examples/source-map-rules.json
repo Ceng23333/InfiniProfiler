@@ -1,0 +1,27 @@
+{
+  "schema_version": "source-map-rules-1",
+  "rules": [
+    {
+      "kind": "graph_guard",
+      "patterns": ["supports_.*graph_capture", "graph_capture_eligible", "graph_guard"]
+    },
+    {
+      "kind": "provider",
+      "provider": "flash_attention",
+      "patterns": ["flash_attn|flash_attention"]
+    },
+    {
+      "kind": "provider",
+      "provider": "native_attention",
+      "patterns": ["native_attention|naive_attention"]
+    },
+    {
+      "kind": "scheduler",
+      "patterns": ["schedule_batch|scheduler_step|run_scheduler|admission_policy"]
+    },
+    {
+      "kind": "deployment_entrypoint",
+      "patterns": ["api_server|entrypoint|serve\\("]
+    }
+  ]
+}

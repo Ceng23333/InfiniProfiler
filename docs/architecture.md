@@ -13,6 +13,7 @@ host runtime events cannot be relabeled as scheduler effort.
 | Capture adapters | Start or attach to a bounded capture, collect raw artifacts |
 | Normalizer | Repair and classify traces into v1 and promotion-grade timeline facts |
 | Naive tools | Provide fallback signals when HCTX/CPU stacks are unavailable |
+| Source mapper | Engine-neutral configured source discovery and exact line provenance |
 | Diagnostics | Compare baseline/candidate families and rank evidence |
 | Promotion bridge | Emit deterministic facts and a one-lever request for AutoHelix |
 
@@ -52,6 +53,12 @@ boundaries by sequence when all ranks expose the same boundary count. At that
 granularity it reports rank busy time, start skew, last-finish skew, straggler
 wait, and imbalance ratio. If boundaries cannot be matched, TP imbalance remains
 coarse and straggler wait is suppressed rather than fabricated.
+
+Source mapping is rule-driven and engine-neutral. InfiniProfiler does not assume
+an engine family in its core; campaigns supply exact symbols and provider rules.
+A graph lever is selected only with paired graph replay timing, a source
+guard/provider hit, or rank-aware graph-replay evidence. A large aggregate graph
+ratio alone is not actionable.
 
 ## Naive fallbacks
 

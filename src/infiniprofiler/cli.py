@@ -27,6 +27,12 @@ from .models import ProfileDocument
 from .promotion.autohelix import promotion_request, write_io_compat
 from .promotion.ranker import primary_wall_ratio, rank_paths
 from .rank_views import RankViewError, build_rank_views_from_capture
+from .source_map import (
+    SourceMapError,
+    build_source_map,
+    load_rules,
+    write_source_map,
+)
 from .tools.sidecar import normalize as normalize_sidecar
 from .tools.process_sampler import discover_pids, sample_interval, write_jsonl
 from .timeline import attribute_trace
@@ -75,12 +81,18 @@ def build_parser() -> argparse.ArgumentParser:
     request.add_argument("--wall-compare", type=Path, required=True)
     request.add_argument("--output", type=Path, required=True)
     _add_identity_args(request)
+    request.add_argument("--timing-attribution", type=Path)
+    request.add_argument("--source-map", type=Path)
+    request.add_argument("--rank-views", type=Path)
 
     io_compat = subparsers.add_parser("io-compat", help="write IO promotion helper artifacts")
     io_compat.add_argument("--profile", type=Path, required=True)
     io_compat.add_argument("--wall-compare", type=Path, required=True)
     io_compat.add_argument("--out-dir", type=Path, required=True)
     io_compat.add_argument("--exhausted", default="")
+    io_compat.add_argument("--timing-attribution", type=Path)
+    io_compat.add_argument("--source-map", type=Path)
+    io_compat.add_argument("--rank-views", type=Path)
 
     validate = subparsers.add_parser("validate", help="validate a normalized profile or request")
     validate.add_argument("--input", type=Path, required=True)
@@ -112,6 +124,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
     attribute.add_argument("--input", type=Path, required=True)
     attribute.add_argument("--output", type=Path, required=True)
+
+    source_map_parser = subparsers.add_parser(
+        "build-source-map",
+        help="scan a source tree into source-map-1",
+    )
+    source_map_parser.add_argument("--source-root", type=Path, required=True)
+    source_map_parser.add_argument("--source-pin", required=True)
+    source_map_parser.add_argument("--rules", type=Path)
+    source_map_parser.add_argument(
+        "--required-symbol",
+        action="append",
+        required=True,
+    )
+    source_map_parser.add_argument("--output", type=Path, required=True)
 
     rank_capture = subparsers.add_parser(
         "rank-capture",
@@ -209,6 +235,9 @@ def run_request(args: argparse.Namespace) -> int:
         iteration=args.iteration,
         promotion_threshold=args.promotion_threshold,
         exhausted=_parse_exhausted(args.exhausted),
+        graph_timing=_load_json(args.timing_attribution) if args.timing_attribution else None,
+        graph_source=_load_json(args.source_map) if args.source_map else None,
+        graph_ranks=_load_json(args.rank_views) if args.rank_views else None,
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -224,6 +253,9 @@ def run_io_compat(args: argparse.Namespace) -> int:
         wall_compare=compare,
         out_dir=args.out_dir,
         exhausted=_parse_exhausted(args.exhausted),
+        graph_timing=_load_json(args.timing_attribution) if args.timing_attribution else None,
+        graph_source=_load_json(args.source_map) if args.source_map else None,
+        graph_ranks=_load_json(args.rank_views) if args.rank_views else None,
     )
     for name, path in paths.items():
         print(f"{name}={path}")
@@ -335,6 +367,22 @@ def run_rank_capture(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_build_source_map(args: argparse.Namespace) -> int:
+    rules = load_rules(args.rules) if args.rules else None
+    document = build_source_map(
+        args.source_root,
+        source_pin=args.source_pin,
+        rules=rules,
+        required_symbols=args.required_symbol,
+    )
+    write_source_map(document, args.output)
+    print(
+        f"wrote {args.output} files={document['scanned_file_count']} "
+        f"symbols={len(document['symbols'])} providers={len(document['providers'])}"
+    )
+    return 0
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -349,6 +397,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "merge-capture": run_merge_capture,
         "attribute-trace": run_attribute_trace,
         "rank-capture": run_rank_capture,
+        "build-source-map": run_build_source_map,
     }
     try:
         return handlers[args.command](args)
@@ -362,3 +411,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     except RankViewError as exc:
         print(f"rank-view error: {exc}", file=sys.stderr)
         return 1
+    except SourceMapError as exc:
+        print(f"source-map error: {exc}", file=sys.stderr)
+        return 2

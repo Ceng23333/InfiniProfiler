@@ -33,5 +33,11 @@ Scheduler paths require exact canonical `infinilm:` spans. Metric-only sidecar
 data can enrich a matched scheduler finding but cannot create one. A sidecar
 stream with no matched window cannot enter a P0 promotion request.
 
+Graph paths have the same evidence discipline. A source guard, configured
+provider hit, explicitly paired graph replay timing, or matched rank-tail
+evidence can select a source-scope graph path. A generic
+`runtime.host_graph_command` path remains diagnostic only and cannot be selected
+from a graph ratio alone.
+
 Rank order is explicit evidence first, wall severity second. The implementation
 does not infer a scheduler path from a large `gap` ratio alone.

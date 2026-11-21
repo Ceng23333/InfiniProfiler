@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
@@ -98,6 +98,10 @@ class SourceMap:
     source_root_hash: str
     symbols: List[Dict[str, Any]]
     providers: List[Dict[str, Any]]
+    source_root: Optional[str] = None
+    scanned_file_count: int = 0
+    artifacts: List[Dict[str, Any]] = field(default_factory=list)
+    rules: List[Dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass

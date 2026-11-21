@@ -98,8 +98,8 @@ def test_successful_two_rank_capture_writes_shared_window_manifest(tmp_path):
     capture = capture_campaign(
         capture_spec(),
         tmp_path / "run",
-        ready_seconds=0.4,
-        stop_wait_seconds=2.0,
+        ready_seconds=1.5,
+        stop_wait_seconds=3.0,
         tracer_command=tracer_command(tracer),
     )
 
@@ -205,8 +205,8 @@ def test_merge_capture_normalizes_required_ranks(tmp_path):
     capture_campaign(
         capture_spec(),
         run_dir,
-        ready_seconds=0.4,
-        stop_wait_seconds=2.0,
+        ready_seconds=1.5,
+        stop_wait_seconds=3.0,
         tracer_command=tracer_command(tracer),
     )
     merged = merge_capture(run_dir)

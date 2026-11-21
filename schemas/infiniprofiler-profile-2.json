@@ -156,7 +156,11 @@
         "source_pin": {"type": "string", "minLength": 1},
         "source_root_hash": {"type": "string", "minLength": 1},
         "symbols": {"type": "array", "items": {"type": "object"}},
-        "providers": {"type": "array", "items": {"type": "object"}}
+        "providers": {"type": "array", "items": {"type": "object"}},
+        "source_root": {"type": "string"},
+        "scanned_file_count": {"type": "integer", "minimum": 0},
+        "artifacts": {"type": "array", "items": {"type": "object"}},
+        "rules": {"type": "array", "items": {"type": "object"}}
       }
     }
   }

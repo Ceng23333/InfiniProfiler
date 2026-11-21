@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from ..models import ProfileDocument
 from ..scheduler import (
@@ -26,6 +26,10 @@ LEVERS = {
     "scheduler.batch_packing": "tune admission/batch packing; raise tokens per iteration",
     "scheduler.queue_admission": "inspect admission queue and request dispatch policy",
     "runtime.host_graph_command": "inspect graph policy, host sync, and launch batching",
+    "graph.source_guard": "disable or narrow the source-level graph-capture guard",
+    "graph.provider_selection": "inspect provider selection and graph-compatible fallback path",
+    "graph.replay_exclusive": "inspect graph replay device work in the selected source scope",
+    "graph.tp_tail": "inspect graph-replay tail latency across TP ranks",
     "kernel.material": "inspect the highest-ratio material device kernel bucket",
 }
 
@@ -34,6 +38,12 @@ def _number(value: Any) -> Optional[float]:
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         return float(value)
     return None
+
+
+def _value(container: Any, name: str) -> Any:
+    if isinstance(container, Mapping):
+        return container.get(name)
+    return getattr(container, name, None)
 
 
 def primary_wall_ratio(compare: Dict[str, Any]) -> Optional[float]:
@@ -145,10 +155,101 @@ def rank_paths(
     *,
     wall_ratio: Optional[float] = None,
     exhausted: Optional[Sequence[str]] = None,
+    graph_timing: Optional[Any] = None,
+    graph_source: Optional[Any] = None,
+    graph_ranks: Optional[Any] = None,
 ) -> Dict[str, Any]:
     excluded = set(exhausted or [])
     ranked: List[Dict[str, Any]] = []
     seen = set(excluded)
+
+    graph_timing_mode = _value(graph_timing, "evidence_mode")
+    graph_launch_time = _value(graph_timing, "graph_launch_us") or 0.0
+    graph_replay_time = _value(graph_timing, "graph_replay_device_us") or 0.0
+    graph_timing_paired = (
+        graph_timing is not None
+        and graph_timing_mode == "EXCLUSIVE_UNION_WITH_EXPLICIT_CORRELATION"
+        and float(graph_launch_time) > 0.0
+        and float(graph_replay_time) > 0.0
+    )
+
+    graph_guard_symbols: List[Mapping[str, Any]] = []
+    graph_providers: List[Mapping[str, Any]] = []
+    if graph_source is not None:
+        for symbol in _value(graph_source, "symbols") or []:
+            if isinstance(symbol, Mapping) and symbol.get("kind") == "graph_guard":
+                graph_guard_symbols.append(symbol)
+        graph_providers = list(_value(graph_source, "providers") or [])
+
+    graph_tail = False
+    if graph_ranks is not None:
+        for rank_view in _value(graph_ranks, "rank_views") or []:
+            if (
+                _value(rank_view, "boundary_status") == "MATCHED_GRAPH_REPLAY"
+                and float(_value(rank_view, "tp_imbalance_ratio") or 0.0) >= 1.2
+            ):
+                graph_tail = True
+                break
+
+    graph_path: Optional[Dict[str, Any]] = None
+    if graph_guard_symbols:
+        files = sorted(
+            {
+                str(symbol.get("file"))
+                for symbol in graph_guard_symbols
+                if symbol.get("file")
+            }
+        )
+        graph_path = {
+            "path_id": "graph.source_guard",
+            "reasons": [
+                "source map contains an explicit graph-capture guard",
+                f"source files={','.join(files)}",
+            ],
+            "lever": LEVERS["graph.source_guard"],
+            "source_files": files,
+        }
+    elif graph_providers:
+        providers = sorted(
+            str(provider.get("provider"))
+            for provider in graph_providers
+            if provider.get("provider")
+        )
+        graph_path = {
+            "path_id": "graph.provider_selection",
+            "reasons": [
+                "source map contains graph-relevant provider selection rules",
+                f"providers={','.join(providers)}",
+            ],
+            "lever": LEVERS["graph.provider_selection"],
+        }
+    elif graph_timing_paired:
+        graph_path = {
+            "path_id": "graph.replay_exclusive",
+            "reasons": [
+                "explicitly correlated graph launch and replay device work",
+                f"graph_launch_us={float(graph_launch_time):.3f}",
+                f"graph_replay_device_us={float(graph_replay_time):.3f}",
+            ],
+            "lever": LEVERS["graph.replay_exclusive"],
+        }
+    elif graph_tail:
+        graph_path = {
+            "path_id": "graph.tp_tail",
+            "reasons": ["matched graph-replay boundaries show TP tail evidence"],
+            "lever": LEVERS["graph.tp_tail"],
+        }
+
+    if graph_path is not None:
+        graph_path.update(
+            {
+                "rank": len(ranked) + 1,
+                "priority_rule": 2,
+                "score": float(graph_replay_time or graph_launch_time or 0.0),
+            }
+        )
+        ranked.append(graph_path)
+        seen.add(str(graph_path["path_id"]))
 
     for finding in scheduler_findings(profile):
         path_id = f"scheduler.{finding['family']}"
@@ -172,7 +273,7 @@ def rank_paths(
             {
                 "rank": len(ranked) + 1,
                 "path_id": "runtime.host_graph_command",
-                "priority_rule": 2,
+                "priority_rule": 3,
                 "reasons": [
                     "host runtime/command/gap evidence crossed the documented threshold",
                     "this is not scheduler packing effort",
@@ -202,6 +303,13 @@ def rank_paths(
         "top_path": ranked[0]["path_id"],
         "host_first_fired": host_first_fired(profile, wall_ratio),
         "scheduler_evidence_count": len(scheduler_findings(profile)),
+        "graph_evidence": {
+            "selected": graph_path is not None,
+            "paired_graph_timing": graph_timing_paired,
+            "source_guard_hits": len(graph_guard_symbols),
+            "source_provider_hits": len(graph_providers),
+            "tp_tail": graph_tail,
+        },
         "ranked": ranked,
         "exhausted": sorted(excluded),
     }

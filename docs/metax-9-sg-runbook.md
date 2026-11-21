@@ -92,6 +92,22 @@ Inspect `evidence_mode` before treating launch latency as exact. If hcTracer did
 not export correlation IDs, output has `correlation_status=UNKNOWN` and adjacent
 timestamp pairing is only a guess.
 
+Before selecting a graph lever, build the source map from the exact candidate
+source pin:
+
+```bash
+python3 -m infiniprofiler build-source-map \
+  --source-root /path/to/infinilm-candidate \
+  --source-pin "${CANDIDATE_PIN}" \
+  --rules "${INFINIPROFILER_ROOT}/examples/source-map-rules.json" \
+  --required-symbol 'MhaKVCache::supports_device_graph_capture' \
+  --output /path/to/profile/source-map.json
+```
+
+Then pass `--timing-attribution`, `--source-map`, and `--rank-views` to
+`promotion-request`. Without those graph inputs, InfiniProfiler will not turn an
+aggregate graph ratio into a graph lever.
+
 The current runner requires one unique live PID per rank. If InfiniLM implements
 TP ranks as threads in one process, do not attach the same PID multiple times and
 do not fabricate rank PIDs. Treat that as one process capture until rank-aware
