@@ -46,6 +46,9 @@ class TimelineAttribution:
     scheduler_signals: List[Dict[str, Any]]
     warnings: List[str]
     database: Optional[str] = None
+    trace_start_us: Optional[float] = None
+    trace_end_us: Optional[float] = None
+    graph_replay_boundaries: List[Dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -381,6 +384,73 @@ def _paired_latencies(connection: sqlite3.Connection, *, explicit_only: bool) ->
     return launch_total, after_total, paired, unpaired
 
 
+def _gpu_interval_total_filtered(
+    connection: sqlite3.Connection,
+    pid: int,
+    correlation_id: str,
+) -> float:
+    cursor = connection.execute(
+        "SELECT start_us, end_us FROM events "
+        "WHERE category IN ('gpu_execution', 'graph_device') "
+        "AND pid = ? AND correlation_id = ? ORDER BY start_us, end_us",
+        (pid, correlation_id),
+    )
+    active_start: Optional[float] = None
+    active_end = 0.0
+    total = 0.0
+    for start, end in cursor:
+        start = float(start)
+        end = float(end)
+        if end <= start:
+            continue
+        if active_start is None:
+            active_start = start
+            active_end = end
+        elif start <= active_end:
+            active_end = max(active_end, end)
+        else:
+            total += active_end - active_start
+            active_start = start
+            active_end = end
+    if active_start is not None:
+        total += active_end - active_start
+    return max(0.0, total)
+
+
+def _graph_replay_boundaries(connection: sqlite3.Connection) -> List[Dict[str, Any]]:
+    launches = connection.execute(
+        "SELECT pid, correlation_id, MIN(start_us), MAX(end_us), COUNT(*) "
+        "FROM events WHERE category = 'graph_launch' AND correlation_id IS NOT NULL "
+        "GROUP BY pid, correlation_id ORDER BY MIN(start_us), pid, correlation_id"
+    ).fetchall()
+    boundaries: List[Dict[str, Any]] = []
+    for pid, correlation, start, end, launch_count in launches:
+        devices = connection.execute(
+            "SELECT start_us, end_us FROM events "
+            "WHERE category = 'graph_device' AND pid = ? AND correlation_id = ? "
+            "ORDER BY start_us, end_us",
+            (pid, correlation),
+        ).fetchall()
+        if not devices:
+            continue
+        device_start = min(float(row[0]) for row in devices)
+        device_end = max(float(row[1]) for row in devices)
+        boundary_start = min(float(start), device_start)
+        boundary_end = max(float(end), device_end)
+        boundaries.append(
+            {
+                "pid": int(pid),
+                "correlation_id": str(correlation),
+                "launch_count": int(launch_count),
+                "device_event_count": len(devices),
+                "start_us": boundary_start,
+                "end_us": boundary_end,
+                "gpu_busy_us": _gpu_interval_total_filtered(connection, int(pid), str(correlation)),
+            }
+        )
+    return boundaries
+
+
 def _scheduler_signal(
     key: Tuple[str, str],
     aggregate: Dict[str, Any],
@@ -530,6 +600,9 @@ def attribute_trace(
         )
 
     connection.commit()
+    trace_bounds = connection.execute("SELECT MIN(start_us), MAX(end_us) FROM events").fetchone()
+    trace_start = float(trace_bounds[0]) if trace_bounds[0] is not None else None
+    trace_end = float(trace_bounds[1]) if trace_bounds[1] is not None else None
     api_submit = _interval_total(connection, "api_submit")
     gpu_execution = _gpu_interval_total(connection)
     sync_wait = _interval_total(connection, "sync")
@@ -577,6 +650,9 @@ def attribute_trace(
         scheduler_signals=scheduler_signals,
         warnings=warnings,
         database=str(database_path),
+        trace_start_us=trace_start,
+        trace_end_us=trace_end,
+        graph_replay_boundaries=_graph_replay_boundaries(connection),
     )
     connection.close()
     return attribution

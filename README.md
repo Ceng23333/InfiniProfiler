@@ -46,6 +46,17 @@ python -m infiniprofiler io-compat \
 python -m infiniprofiler validate --input profile.json
 python -m infiniprofiler validate --kind promotion-request --input request.json
 
+python -m infiniprofiler capture-campaign \
+  --spec capture-spec.json --out-dir profile/window0
+
+python -m infiniprofiler compare-capture-manifests \
+  --baseline profile/baseline/window0/window_manifest.json \
+  --candidate profile/candidate/window0/window_manifest.json \
+  --output profile/capture_comparison.json
+
+python -m infiniprofiler merge-capture --capture-dir profile/candidate/window0
+python -m infiniprofiler rank-capture --capture-dir profile/candidate/window0
+
 python -m infiniprofiler attribute-trace \
   --input trace.json --output timing.json
 ```

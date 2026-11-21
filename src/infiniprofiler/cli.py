@@ -26,6 +26,7 @@ from .capture import (
 from .models import ProfileDocument
 from .promotion.autohelix import promotion_request, write_io_compat
 from .promotion.ranker import primary_wall_ratio, rank_paths
+from .rank_views import RankViewError, build_rank_views_from_capture
 from .tools.sidecar import normalize as normalize_sidecar
 from .tools.process_sampler import discover_pids, sample_interval, write_jsonl
 from .timeline import attribute_trace
@@ -111,6 +112,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     attribute.add_argument("--input", type=Path, required=True)
     attribute.add_argument("--output", type=Path, required=True)
+
+    rank_capture = subparsers.add_parser(
+        "rank-capture",
+        help="aggregate per-rank TP imbalance and straggler facts",
+    )
+    rank_capture.add_argument("--capture-dir", type=Path, required=True)
+    rank_capture.add_argument("--output", type=Path)
     return parser
 
 
@@ -317,6 +325,16 @@ def run_attribute_trace(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_rank_capture(args: argparse.Namespace) -> int:
+    output = args.output or args.capture_dir / "rank_views.json"
+    result = build_rank_views_from_capture(args.capture_dir, output)
+    print(
+        f"wrote {output} status={result.status} ranks={len(result.rank_views)} "
+        f"boundary_status={result.boundary_status}"
+    )
+    return 0
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -330,6 +348,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "compare-capture-manifests": run_compare_capture,
         "merge-capture": run_merge_capture,
         "attribute-trace": run_attribute_trace,
+        "rank-capture": run_rank_capture,
     }
     try:
         return handlers[args.command](args)
@@ -339,4 +358,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 2
     except CaptureError as exc:
         print(f"capture error: {exc}", file=sys.stderr)
+        return 1
+    except RankViewError as exc:
+        print(f"rank-view error: {exc}", file=sys.stderr)
         return 1

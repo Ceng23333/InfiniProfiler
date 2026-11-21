@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://infiniprofiler.dev/schemas/infiniprofiler-rank-views-1.json",
+  "title": "Per-rank TP imbalance and straggler views",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "status",
+    "merge_ref",
+    "manifest_ref",
+    "window_id",
+    "campaign_id",
+    "role",
+    "expected_rank_count",
+    "boundary_status",
+    "correlation_status",
+    "rank_views",
+    "warnings"
+  ],
+  "properties": {
+    "schema_version": {"const": "infiniprofiler-rank-views-1"},
+    "status": {"enum": ["MATCHED_GRAPH_REPLAY", "COARSE_ONLY"]},
+    "merge_ref": {"type": "string"},
+    "manifest_ref": {"type": "string"},
+    "window_id": {"type": "string"},
+    "campaign_id": {"type": "string"},
+    "role": {"enum": ["baseline", "candidate"]},
+    "expected_rank_count": {"type": "integer", "minimum": 1},
+    "boundary_status": {"enum": ["MATCHED_GRAPH_REPLAY", "UNMATCHED"]},
+    "correlation_status": {"enum": ["EXPLICIT", "UNKNOWN"]},
+    "rank_views": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "rank",
+          "pid",
+          "gpu_busy_us",
+          "start_epoch_ns",
+          "end_epoch_ns",
+          "start_skew_us",
+          "last_finish_skew_us",
+          "straggler_wait_us",
+          "tp_imbalance_ratio",
+          "correlation_status",
+          "granularity",
+          "boundary_count",
+          "boundary_status"
+        ],
+        "properties": {
+          "rank": {"type": "integer", "minimum": 0},
+          "pid": {"type": "integer", "minimum": 1},
+          "gpu_busy_us": {"type": "number", "minimum": 0},
+          "start_epoch_ns": {"type": "integer"},
+          "end_epoch_ns": {"type": "integer"},
+          "start_skew_us": {"type": "number", "minimum": 0},
+          "last_finish_skew_us": {"type": "number", "minimum": 0},
+          "straggler_wait_us": {"type": "number", "minimum": 0},
+          "tp_imbalance_ratio": {"type": "number", "minimum": 0},
+          "correlation_status": {"enum": ["EXPLICIT", "UNKNOWN"]},
+          "granularity": {"type": "string"},
+          "boundary_count": {"type": "integer", "minimum": 0},
+          "boundary_status": {"enum": ["MATCHED_GRAPH_REPLAY", "UNMATCHED"]}
+        }
+      }
+    },
+    "warnings": {"type": "array", "items": {"type": "string"}}
+  }
+}

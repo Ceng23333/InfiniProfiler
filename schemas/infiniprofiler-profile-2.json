@@ -115,7 +115,10 @@
         "last_finish_skew_us": {"type": "number", "minimum": 0},
         "straggler_wait_us": {"type": "number", "minimum": 0},
         "tp_imbalance_ratio": {"type": "number", "minimum": 0},
-        "correlation_status": {"enum": ["EXPLICIT", "UNKNOWN"]}
+        "correlation_status": {"enum": ["EXPLICIT", "UNKNOWN"]},
+        "granularity": {"type": "string"},
+        "boundary_count": {"type": "integer", "minimum": 0},
+        "boundary_status": {"enum": ["UNMATCHED", "MATCHED_GRAPH_REPLAY"]}
       }
     },
     "timingAttribution": {

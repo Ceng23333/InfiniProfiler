@@ -67,6 +67,19 @@ python3 -m infiniprofiler merge-capture \
   --capture-dir /path/to/profile/candidate/window0
 ```
 
+The merge automatically writes `rank_views.json`. To regenerate it after a
+parser update:
+
+```bash
+python3 -m infiniprofiler rank-capture \
+  --capture-dir /path/to/profile/candidate/window0
+```
+
+`MATCHED_GRAPH_REPLAY` means the same graph-replay boundary sequence was found
+on every required rank and straggler wait is measured at that granularity.
+`COARSE_ONLY` means TP imbalance is a capture-window proxy and straggler wait is
+suppressed.
+
 For one raw rank trace, emit exclusive timing attribution with:
 
 ```bash

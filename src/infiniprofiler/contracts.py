@@ -71,6 +71,9 @@ class RankView:
     correlation_status: str
     stream: Optional[str] = None
     tid: Optional[int] = None
+    granularity: str = "capture_window"
+    boundary_count: int = 0
+    boundary_status: str = "UNMATCHED"
 
 
 @dataclass
@@ -302,6 +305,15 @@ def _parse_rank_views(raw: Any, errors: List[str]) -> List[RankView]:
             _nonnegative(row.get(key), errors, f"{path}.{key}")
         if row.get("correlation_status") not in CORRELATION_STATES:
             errors.append(f"{path}.correlation_status must be one of {sorted(CORRELATION_STATES)}")
+        if row.get("boundary_count", 0) is not None:
+            _integer(row.get("boundary_count", 0), errors, f"{path}.boundary_count", minimum=0)
+        if row.get("boundary_status", "UNMATCHED") not in (
+            "UNMATCHED",
+            "MATCHED_GRAPH_REPLAY",
+        ):
+            errors.append(
+                f"{path}.boundary_status must be UNMATCHED or MATCHED_GRAPH_REPLAY"
+            )
         if errors:
             continue
         ranks.append(RankView(**row))

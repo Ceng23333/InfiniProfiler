@@ -43,18 +43,31 @@ def capture_spec(**overrides) -> CaptureSpec:
 def fake_tracer(tmp_path: Path, *, succeed: bool = True) -> Path:
     path = tmp_path / ("tracer_ok" if succeed else "tracer_fail")
     if succeed:
-        body = '''#!/usr/bin/env python3
-import json, sys
-from pathlib import Path
-raw = Path("raw")
-raw.mkdir(parents=True, exist_ok=True)
-document = {"traceEvents": []}
-text = json.dumps(document)
-text += " " * max(0, 65536 - len(text))
-(raw / "tracer_out-0.json").write_text(text, encoding="utf-8")
-sys.stdin.buffer.read(1)
-sys.stdin.buffer.read()
-'''
+        document = {
+            "traceEvents": [
+                {
+                    "name": "kernel_a",
+                    "ph": "X",
+                    "cat": "kernel",
+                    "ts": 0,
+                    "dur": 1000,
+                    "pid": 1000,
+                }
+            ]
+        }
+        body = (
+            "#!/usr/bin/env python3\n"
+            "import json, sys\n"
+            "from pathlib import Path\n"
+            "raw = Path('raw')\n"
+            "raw.mkdir(parents=True, exist_ok=True)\n"
+            f"document = {json.dumps(document)}\n"
+            "text = json.dumps(document)\n"
+            "text += ' ' * max(0, 65536 - len(text))\n"
+            "(raw / 'tracer_out-0.json').write_text(text, encoding='utf-8')\n"
+            "sys.stdin.buffer.read(1)\n"
+            "sys.stdin.buffer.read()\n"
+        )
     else:
         body = "#!/usr/bin/env python3\nimport sys\n"
     path.write_text(body, encoding="utf-8")
@@ -201,7 +214,9 @@ def test_merge_capture_normalizes_required_ranks(tmp_path):
     assert merged["status"] == "COMPLETE"
     assert merged["rank_count"] == 2
     assert [rank["rank"] for rank in merged["ranks"]] == [0, 1]
-    assert all(rank["timing_attribution"]["event_count"] == 0 for rank in merged["ranks"])
+    assert all(rank["timing_attribution"]["event_count"] == 1 for rank in merged["ranks"])
+    assert merged["rank_views_status"] == "COARSE_ONLY"
+    assert (run_dir / "rank_views.json").is_file()
     assert (run_dir / "capture_merge.json").is_file()
 
 

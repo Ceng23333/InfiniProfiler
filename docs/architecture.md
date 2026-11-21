@@ -47,6 +47,12 @@ execution, synchronization, graph launch, and graph replay device work. It
 pairs submit/device intervals when hcTracer exports a correlation ID; otherwise
 it marks adjacent timestamp pairing as a guess and reports the unpaired count.
 
+The TP layer aggregates each rank independently. It matches graph-replay
+boundaries by sequence when all ranks expose the same boundary count. At that
+granularity it reports rank busy time, start skew, last-finish skew, straggler
+wait, and imbalance ratio. If boundaries cannot be matched, TP imbalance remains
+coarse and straggler wait is suppressed rather than fabricated.
+
 ## Naive fallbacks
 
 The sidecar parser accepts a small JSONL contract:

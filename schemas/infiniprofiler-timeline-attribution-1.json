@@ -19,6 +19,9 @@
     "paired_event_count",
     "unpaired_event_count",
     "correlation_status",
+    "trace_start_us",
+    "trace_end_us",
+    "graph_replay_boundaries",
     "host_totals_us",
     "scheduler_signals",
     "warnings"
@@ -44,6 +47,32 @@
     "paired_event_count": {"type": "integer", "minimum": 0},
     "unpaired_event_count": {"type": "integer", "minimum": 0},
     "correlation_status": {"enum": ["EXPLICIT", "UNKNOWN"]},
+    "trace_start_us": {"type": ["number", "null"]},
+    "trace_end_us": {"type": ["number", "null"]},
+    "graph_replay_boundaries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "pid",
+          "correlation_id",
+          "launch_count",
+          "device_event_count",
+          "start_us",
+          "end_us",
+          "gpu_busy_us"
+        ],
+        "properties": {
+          "pid": {"type": "integer", "minimum": 1},
+          "correlation_id": {"type": "string", "minLength": 1},
+          "launch_count": {"type": "integer", "minimum": 1},
+          "device_event_count": {"type": "integer", "minimum": 1},
+          "start_us": {"type": "number"},
+          "end_us": {"type": "number"},
+          "gpu_busy_us": {"type": "number", "minimum": 0}
+        }
+      }
+    },
     "host_totals_us": {"type": "object", "additionalProperties": {"type": "number"}},
     "scheduler_signals": {"type": "array", "items": {"type": "object"}},
     "warnings": {"type": "array", "items": {"type": "string"}},

@@ -117,6 +117,26 @@ def test_graph_parent_and_child_do_not_double_count_device_time(tmp_path):
     assert timeline.evidence_mode == "EXCLUSIVE_UNION_WITH_EXPLICIT_CORRELATION"
     assert timeline.unpaired_event_count == 0
     assert timeline.launch_latency_us == 5
+    assert len(timeline.graph_replay_boundaries) == 1
+    assert timeline.graph_replay_boundaries[0]["correlation_id"] == "g1"
+    assert timeline.graph_replay_boundaries[0]["start_us"] == 0
+    assert timeline.graph_replay_boundaries[0]["end_us"] == 40
+    assert timeline.graph_replay_boundaries[0]["gpu_busy_us"] == 30
+
+
+def test_timeline_reports_classified_trace_span(tmp_path):
+    path = trace_file(
+        tmp_path,
+        "span.json",
+        [
+            event("kernel_a", "kernel", 100, 50),
+            event("kernel_b", "kernel", 200, 20),
+        ],
+    )
+    timeline = attribute_trace(path, database_path=tmp_path / "timeline.db")
+
+    assert timeline.trace_start_us == 100
+    assert timeline.trace_end_us == 220
 
 
 def test_explicit_correlation_pairs_submit_and_device(tmp_path):

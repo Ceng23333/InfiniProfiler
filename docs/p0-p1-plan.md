@@ -371,7 +371,7 @@ record contains both mechanism check and unprofiled wall result.
 | P0-A | Profile/request v2 schemas and validation fixtures (**done**) | Invalid window or missing lever contract rejected by `infiniprofiler validate` |
 | P0-B | Matched multi-rank wrapper and manifest merge (**done**) | Two-rank capture aligns and failed rank aborts cleanly; one-PID/thread-rank splitting is explicitly not supported yet |
 | P0-C | Streaming parser and interval engine (**done**) | Exclusive union, graph nesting, explicit pairing, adjacent-guess warnings, and truncated streaming fixtures pass |
-| P0-D | Rank merge and TP imbalance facts | Synthetic straggler is reported separately |
+| P0-D | Rank merge and TP imbalance facts (**done**) | Graph-replay boundary matching, coarse fallback, and synthetic straggler tests pass |
 | P0-E | InfiniLM sidecar spans and parser rules | Scheduler paths require explicit spans |
 | P0-F | Source map and graph ranking rule | Current graph blocker maps to a source-scope lever |
 | P0-G | Mechanism check bridge | AutoHelix iteration records wall and mechanism independently |

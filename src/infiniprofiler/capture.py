@@ -603,6 +603,18 @@ def merge_capture(out_dir: Path, output_path: Optional[Path] = None) -> Dict[str
         "ranks": rank_summaries,
         "warnings": warnings,
     }
+    # Local import keeps the transactional capture module independent of the
+    # optional P0-D aggregation layer at import time.
+    from .rank_views import build_rank_views_from_capture
+
+    rank_views_path = out_dir / "rank_views.json"
+    rank_views = build_rank_views_from_capture(
+        out_dir,
+        rank_views_path,
+        merge=payload,
+    )
+    payload["rank_views_ref"] = str(rank_views_path)
+    payload["rank_views_status"] = rank_views.status
     destination = output_path or out_dir / "capture_merge.json"
     _write_json_atomic(Path(destination), payload)
     return payload
