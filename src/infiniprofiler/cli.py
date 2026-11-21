@@ -16,6 +16,13 @@ from .contracts import (
     validate_promotion_request_v2,
 )
 from .adapters.hctracer import normalize as normalize_hctracer
+from .capture import (
+    CaptureError,
+    CaptureSpec,
+    capture_campaign,
+    compare_capture_manifests,
+    merge_capture,
+)
 from .models import ProfileDocument
 from .promotion.autohelix import promotion_request, write_io_compat
 from .promotion.ranker import primary_wall_ratio, rank_paths
@@ -80,6 +87,22 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["auto", "profile", "promotion-request"],
         default="auto",
     )
+
+    capture = subparsers.add_parser("capture-campaign", help="run a transactional multi-rank capture")
+    capture.add_argument("--spec", type=Path, required=True)
+    capture.add_argument("--out-dir", type=Path, required=True)
+    capture.add_argument("--hctracer-bin", default="hcTracer")
+    capture.add_argument("--ready-seconds", type=float, default=2.0)
+    capture.add_argument("--stop-wait-seconds", type=float, default=5.0)
+
+    compare = subparsers.add_parser("compare-capture-manifests", help="compare baseline and candidate captures")
+    compare.add_argument("--baseline", type=Path, required=True)
+    compare.add_argument("--candidate", type=Path, required=True)
+    compare.add_argument("--output", type=Path, required=True)
+
+    merge = subparsers.add_parser("merge-capture", help="normalize and merge one successful capture")
+    merge.add_argument("--capture-dir", type=Path, required=True)
+    merge.add_argument("--output", type=Path)
     return parser
 
 
@@ -247,6 +270,34 @@ def run_validate(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_capture(args: argparse.Namespace) -> int:
+    spec = CaptureSpec.from_file(args.spec)
+    capture = capture_campaign(
+        spec,
+        args.out_dir,
+        hctracer_bin=args.hctracer_bin,
+        ready_seconds=args.ready_seconds,
+        stop_wait_seconds=args.stop_wait_seconds,
+    )
+    print(json.dumps(capture.to_dict(), indent=2, sort_keys=True))
+    return 0 if capture.status == "SUCCEEDED" else 1
+
+
+def run_compare_capture(args: argparse.Namespace) -> int:
+    result = compare_capture_manifests(args.baseline, args.candidate)
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    print(f"wrote {args.output} status={result['status']}")
+    return 0 if result["status"] == "MATCHED" else 1
+
+
+def run_merge_capture(args: argparse.Namespace) -> int:
+    payload = merge_capture(args.capture_dir, args.output)
+    destination = args.output or args.capture_dir / "capture_merge.json"
+    print(f"wrote {destination} status={payload['status']} ranks={payload['rank_count']}")
+    return 0
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -263,3 +314,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         for error in exc.errors:
             print(f"contract error: {error}", file=sys.stderr)
         return 2
+    except CaptureError as exc:
+        print(f"capture error: {exc}", file=sys.stderr)
+        return 1

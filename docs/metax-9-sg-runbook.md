@@ -36,6 +36,42 @@ CLIENT_WINDOW_CMD='/path/to/bounded_client_window.sh' \
   "${INFINIPROFILER_ROOT}/scripts/capture_hctracer.sh"
 ```
 
+## Transactional campaign capture
+
+For promotion evidence, use the campaign runner instead of attaching ranks
+independently. It starts every required rank tracer before one shared client
+window, writes `window_manifest.json`, and stops every tracer even when an
+attach or client command fails.
+
+Copy
+[`examples/qwen3-8b-metax9-capture-spec.json`](../examples/qwen3-8b-metax9-capture-spec.json),
+replace the four PIDs and the client/window paths, then run:
+
+```bash
+cd "${INFINIPROFILER_ROOT}"
+python3 -m infiniprofiler capture-campaign \
+  --spec /path/to/candidate-capture-spec.json \
+  --out-dir /path/to/profile/candidate/window0 \
+  --hctracer-bin "${HCTRACER_BIN}"
+```
+
+After baseline and candidate runs, compare manifests before merging or ranking:
+
+```bash
+python3 -m infiniprofiler compare-capture-manifests \
+  --baseline /path/to/profile/baseline/window0/window_manifest.json \
+  --candidate /path/to/profile/candidate/window0/window_manifest.json \
+  --output /path/to/profile/capture_comparison.json
+
+python3 -m infiniprofiler merge-capture \
+  --capture-dir /path/to/profile/candidate/window0
+```
+
+The current runner requires one unique live PID per rank. If InfiniLM implements
+TP ranks as threads in one process, do not attach the same PID multiple times and
+do not fabricate rank PIDs. Treat that as one process capture until rank-aware
+thread splitting is implemented.
+
 ## Naive sidecar capture
 
 When InfiniLM has not yet emitted HCTX ranges, run the engine sidecar producer

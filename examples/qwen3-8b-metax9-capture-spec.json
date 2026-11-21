@@ -1,0 +1,26 @@
+{
+  "schema_version": "infiniprofiler-capture-spec-1",
+  "role": "candidate",
+  "window_id": "qwen3-8b-metax9-decode-256-window0",
+  "campaign_id": "qwen3-8b-metax9-sg",
+  "model": "Qwen3-8B",
+  "baseline_pin": "vllm-frozen",
+  "candidate_pin": "infinilm-candidate",
+  "tensor_parallel": 4,
+  "wall_workload_id": "decode-256",
+  "wall_compare_ref": "/path/to/suite/compare.json",
+  "warmup_excluded": true,
+  "client_command": "/path/to/bounded_client_window.sh",
+  "concurrency": 8,
+  "prompt_lengths": [512],
+  "output_lengths": [256],
+  "batch_size": 8,
+  "clock_policy": "operator_observed",
+  "profiles_source_hash": "sha256:infinilm-candidate-source",
+  "rank_pids": {
+    "0": 1000,
+    "1": 1001,
+    "2": 1002,
+    "3": 1003
+  }
+}
