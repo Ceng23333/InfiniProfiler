@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, Iterator, List, Mapping, Optional, Sequence, Tuple
 
 from .adapters.hctracer import API_RE, GRAPH_RE, KERNEL_RE, MEMCPY_RE, SCHEDULER_RE
+from .scheduler import canonical_scheduler_family
 
 
 TIMELINE_SCHEMA = "infiniprofiler-timeline-attribution-1"
@@ -547,12 +548,9 @@ def attribute_trace(
         correlation = _correlation(event)
         lowered = name.lower()
 
-        if SCHEDULER_RE.search(name):
-            family = "step_control"
-            if "admission" in lowered or "queue" in lowered:
-                family = "queue_admission"
-            elif "batch" in lowered:
-                family = "batch_packing"
+        scheduler_family = canonical_scheduler_family(name)
+        if scheduler_family is not None:
+            family = scheduler_family
             key = (family, name)
             aggregate = scheduler.setdefault(
                 key,

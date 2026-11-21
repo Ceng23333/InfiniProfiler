@@ -99,10 +99,19 @@ thread splitting is implemented.
 
 ## Naive sidecar capture
 
-When InfiniLM has not yet emitted HCTX ranges, run the engine sidecar producer
-inside the serving process. The producer writes explicit ranges; it does not
-sample call stacks. The process sampler is Linux-only and is a coarse CPU
-proxy.
+When InfiniLM has not yet emitted HCTX ranges, use `SidecarSpanRecorder` inside
+the serving process with one `window_id` shared by the baseline and candidate
+window. Emit only exact canonical names: `infinilm:queue_wait`,
+`infinilm:admission`, `infinilm:batch_build`, `infinilm:schedule`,
+`infinilm:forward_step`, and `infinilm:sample`.
+
+Pass structured fields such as `iteration`, `queue_depth`, `batch_size`,
+`tokens_per_iteration`, `acceptance_count`, and `preempt_count` directly on the
+span. Use `NullSpanRecorder` when profiling is disabled so the engine has no
+sidecar serialization or filesystem cost.
+
+The producer writes explicit ranges; it does not sample call stacks. The process
+sampler is Linux-only and is a coarse CPU proxy.
 
 ## Emit the AutoHelix request
 

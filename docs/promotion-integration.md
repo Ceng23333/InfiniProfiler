@@ -29,5 +29,9 @@ Scheduler evidence uses a different path namespace from runtime evidence:
 - `scheduler.queue_admission` for queue growth without equivalent running work.
 - `runtime.host_graph_command` remains the existing host-first path.
 
+Scheduler paths require exact canonical `infinilm:` spans. Metric-only sidecar
+data can enrich a matched scheduler finding but cannot create one. A sidecar
+stream with no matched window cannot enter a P0 promotion request.
+
 Rank order is explicit evidence first, wall severity second. The implementation
 does not infer a scheduler path from a large `gap` ratio alone.

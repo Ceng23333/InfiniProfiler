@@ -17,12 +17,18 @@ def test_cli_normalizes_and_validates_sidecar(tmp_path, capsys):
                 json.dumps(
                     {
                         "type": "span",
-                        "name": "scheduler.step",
+                        "name": "infinilm:schedule",
+                        "window_id": "window-0",
                         "duration_us": 25,
                     }
                 ),
                 json.dumps(
-                    {"type": "metric", "name": "batch_size", "value": 6}
+                    {
+                        "type": "metric",
+                        "name": "batch_size",
+                        "value": 6,
+                        "window_id": "window-0",
+                    },
                 ),
             ]
         )

@@ -58,9 +58,13 @@ coarse and straggler wait is suppressed rather than fabricated.
 The sidecar parser accepts a small JSONL contract:
 
 ```json
-{"type":"span","name":"scheduler.step","start_ns":1,"end_ns":2,"tid":42,"rank":0}
+{"type":"span","span_id":1,"name":"infinilm:schedule","window_id":"window-0","start_ns":1,"end_ns":2,"tid":42,"rank":0}
 {"type":"metric","name":"tokens_per_iteration","value":31.5,"rank":0}
 ```
+
+Only exact canonical names become scheduler facts. Unknown scheduler-looking
+names remain warnings. A sidecar stream without one accepted window identity
+cannot enter a promotion request.
 
 The process sampler is intentionally simple and only uses `/proc`. It samples
 per-thread CPU time, voluntary/involuntary context switches, and command lines.

@@ -5,6 +5,12 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Sequence
 
 from ..models import ProfileDocument
+from ..scheduler import (
+    ADMISSION,
+    BATCH_BUILD,
+    QUEUE_WAIT,
+    canonical_scheduler_family,
+)
 
 
 HOST_FIRST_WALL = 0.90
@@ -75,11 +81,23 @@ def _metric_ratio(profile: ProfileDocument, names: Sequence[str]) -> Optional[fl
 def scheduler_findings(profile: ProfileDocument) -> List[Dict[str, Any]]:
     findings: List[Dict[str, Any]] = []
 
+    def explicit_span(*names: str) -> bool:
+        return any(
+            signal.name in names
+            and canonical_scheduler_family(signal.name) is not None
+            and signal.source in ("naive-sidecar", "hctracer.marker")
+            for signal in profile.scheduler_signals
+        )
+
     tok_ratio = _metric_ratio(
         profile,
         ("tokens_per_iteration", "avg_decoded_tok_per_iter", "tok_per_iter"),
     )
-    if tok_ratio is not None and tok_ratio < PACKING_RATIO_MAX:
+    if (
+        tok_ratio is not None
+        and tok_ratio < PACKING_RATIO_MAX
+        and explicit_span(BATCH_BUILD)
+    ):
         findings.append(
             {
                 "family": "batch_packing",
@@ -89,7 +107,11 @@ def scheduler_findings(profile: ProfileDocument) -> List[Dict[str, Any]]:
         )
 
     queue_ratio = _metric_ratio(profile, ("queue_depth", "waiting_requests"))
-    if queue_ratio is not None and queue_ratio >= SCHEDULER_RATIO_MIN:
+    if (
+        queue_ratio is not None
+        and queue_ratio >= SCHEDULER_RATIO_MIN
+        and explicit_span(QUEUE_WAIT, ADMISSION)
+    ):
         findings.append(
             {
                 "family": "queue_admission",
@@ -99,6 +121,11 @@ def scheduler_findings(profile: ProfileDocument) -> List[Dict[str, Any]]:
         )
 
     for signal in profile.scheduler_signals:
+        if canonical_scheduler_family(signal.name) is None or signal.source not in (
+            "naive-sidecar",
+            "hctracer.marker",
+        ):
+            continue
         if signal.ratio is None or signal.ratio < SCHEDULER_RATIO_MIN:
             continue
         findings.append(

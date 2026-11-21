@@ -27,8 +27,8 @@ def test_normalizes_host_and_explicit_scheduler_markers(tmp_path):
                 {"ph": "X", "name": "hcLaunchKernel", "dur": 200},
                 {"ph": "X", "name": "hcMemcpy", "dur": 100},
                 {"ph": "X", "name": "attention_kernel", "cat": "kernel", "dur": 150},
-                {"ph": "X", "name": "infinilm.scheduler.batch_build", "dur": 80, "args": {"rank": 3}},
-                {"ph": "X", "name": "infinilm.scheduler.step", "dur": 40, "args": {"rank": 3}},
+                {"ph": "X", "name": "infinilm:batch_build", "dur": 80, "args": {"rank": 3}},
+                {"ph": "X", "name": "infinilm:schedule", "dur": 40, "args": {"rank": 3}},
             ]
         ),
     )
@@ -38,8 +38,8 @@ def test_normalizes_host_and_explicit_scheduler_markers(tmp_path):
     assert profile.host("api").candidate == 300
     assert profile.host("gap").candidate == 50
     assert {signal.name for signal in profile.scheduler_signals} == {
-        "infinilm.scheduler.batch_build",
-        "infinilm.scheduler.step",
+        "infinilm:batch_build",
+        "infinilm:schedule",
     }
     assert profile.scheduler("batch_packing").ranks == [3]
     assert not any("no_scheduler_annotations" in warning for warning in profile.warnings)
@@ -62,12 +62,12 @@ def test_compares_matching_scheduler_markers(tmp_path):
     baseline = write(
         tmp_path,
         "baseline.json",
-        trace([{"ph": "X", "name": "scheduler.step", "dur": 20}]),
+            trace([{"ph": "X", "name": "infinilm:schedule", "dur": 20}]),
     )
     candidate = write(
         tmp_path,
         "candidate.json",
-        trace([{"ph": "X", "name": "scheduler.step", "dur": 40}]),
+            trace([{"ph": "X", "name": "infinilm:schedule", "dur": 40}]),
     )
     profile = normalize(candidate, baseline_path=baseline)
     signal = profile.scheduler("step_control")

@@ -209,6 +209,26 @@ def test_valid_request_v2_is_accepted():
     assert parsed["mechanism_check"].status == "NOT_RUN"
 
 
+def test_profile_v2_rejects_noncanonical_scheduler_signal():
+    document = valid_profile()
+    document["scheduler_signals"].append(
+        {
+            "family": "step_control",
+            "name": "scheduler.step",
+            "candidate_us": 100,
+            "count": 1,
+            "source": "naive-sidecar",
+        }
+    )
+
+    with pytest.raises(ContractValidationError) as excinfo:
+        validate_profile_v2(document)
+
+    assert any(
+        "must be a canonical InfiniLM span" in error for error in excinfo.value.errors
+    )
+
+
 def test_request_v2_rejects_missing_lever_contract():
     document = valid_request()
     del document["lever_contract"]

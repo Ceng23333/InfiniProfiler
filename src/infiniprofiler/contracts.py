@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
 from .models import Capture, EngineMetric, HostSignal, SchedulerSignal
+from .scheduler import canonical_scheduler_family
 
 
 PROFILE_SCHEMA = "infiniprofiler-profile-2"
@@ -402,6 +403,21 @@ def validate_profile_v2(document: Mapping[str, Any]) -> ProfileV2:
                 model(**item)
             except TypeError as exc:
                 errors.append(f"{key}[{index}] fields are invalid: {exc}")
+            if key == "scheduler_signals" and isinstance(item, dict):
+                expected_family = canonical_scheduler_family(str(item.get("name") or ""))
+                source = str(item.get("source") or "")
+                if expected_family is None:
+                    errors.append(
+                        f"scheduler_signals[{index}].name must be a canonical InfiniLM span"
+                    )
+                elif item.get("family") != expected_family:
+                    errors.append(
+                        f"scheduler_signals[{index}].family must be {expected_family}"
+                    )
+                if source not in ("hctracer.marker", "naive-sidecar"):
+                    errors.append(
+                        f"scheduler_signals[{index}].source must be an explicit span producer"
+                    )
 
     warnings = document.get("warnings")
     if not isinstance(warnings, list) or any(not isinstance(item, str) for item in warnings):

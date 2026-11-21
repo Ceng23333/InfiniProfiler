@@ -32,6 +32,12 @@ def promotion_request(
     promotion_threshold: float = 1.0,
     exhausted: Optional[Sequence[str]] = None,
 ) -> Dict[str, Any]:
+    if profile.capture.source == "naive-sidecar":
+        provenance = profile.capture.provenance
+        if provenance.get("window_matched") is not True:
+            raise ValueError("naive-sidecar profile has no matched window; P0 request rejected")
+        if provenance.get("windows_matched") is False:
+            raise ValueError("naive-sidecar baseline/candidate windows do not match; P0 request rejected")
     wall_ratio = primary_wall_ratio(wall_compare)
     backlog = rank_paths(profile, wall_ratio=wall_ratio, exhausted=exhausted)
     top = backlog["ranked"][0]

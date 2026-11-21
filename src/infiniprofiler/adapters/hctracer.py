@@ -15,6 +15,7 @@ from ..models import (
     SchedulerSignal,
     safe_ratio,
 )
+from ..scheduler import canonical_scheduler_family
 
 
 API_RE = re.compile(r"^(hc|mc|cuda|cu)[A-Z]", re.IGNORECASE)
@@ -126,14 +127,9 @@ def _scheduler_span_totals(doc: Dict[str, Any]) -> Tuple[Dict[Tuple[str, str], D
     for event in _events(doc):
         name = str(event.get("name") or "")
         duration = _duration(event)
-        if duration <= 0 or not SCHEDULER_RE.search(name):
+        family = canonical_scheduler_family(name)
+        if duration <= 0 or family is None:
             continue
-        lowered = name.lower()
-        family = "step_control"
-        if "admission" in lowered:
-            family = "queue_admission"
-        elif "batch" in lowered:
-            family = "batch_packing"
         key = (family, name)
         item = spans.setdefault(
             key,
@@ -226,8 +222,8 @@ def normalize(
     scheduler = extract_scheduler_signals(doc, baseline_scheduler_spans)
     if not scheduler:
         warnings.append(
-            "no_scheduler_annotations: the trace has no HCTX/marker ranges; "
-            "host gaps are not scheduler evidence"
+            "no_scheduler_annotations: the trace has no canonical InfiniLM "
+            "HCTX/marker ranges; host gaps are not scheduler evidence"
         )
 
     capture = Capture(
