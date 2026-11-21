@@ -39,5 +39,11 @@ evidence can select a source-scope graph path. A generic
 `runtime.host_graph_command` path remains diagnostic only and cannot be selected
 from a graph ratio alone.
 
+Use `promotion-request-v2` for the complete lever contract. It requires the
+observed top path to match the lever, carries `stop_before_promote=true`, and
+evaluates only declared mechanism signals. After rebuild, `evaluate-mechanism`
+classifies the movement as `MOVED`, `NO_CHANGE`, `REGRESSED`, or
+`INCONCLUSIVE`. Promotion remains an unprofiled wall decision.
+
 Rank order is explicit evidence first, wall severity second. The implementation
 does not infer a scheduler path from a large `gap` ratio alone.

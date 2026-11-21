@@ -64,6 +64,19 @@ python -m infiniprofiler build-source-map \
   --required-symbol 'Provider::supports_graph_capture' \
   --output source-map.json
 
+python -m infiniprofiler promotion-request-v2 \
+  --profile profile.json --wall-compare compare.json \
+  --lever-contract lever.json --window-id window-0 \
+  --profile-ref profile/candidate.json \
+  --before-profile before.json --before-profile-ref profile/before.json \
+  --campaign-id campaign --baseline-pin frozen --candidate-pin candidate \
+  --iteration 0 --output request-v2.json
+
+python -m infiniprofiler evaluate-mechanism \
+  --request request-v2.json --before-profile before.json \
+  --after-profile after.json --before-profile-ref profile/before.json \
+  --after-profile-ref profile/after.json --output request-v2-moved.json
+
 python -m infiniprofiler attribute-trace \
   --input trace.json --output timing.json
 ```
@@ -81,3 +94,6 @@ pytest
 The Python implementation has no third-party runtime dependencies; timeline
 staging uses Python's built-in sqlite3 module. Engine-specific source symbols
 are campaign configuration, not core assumptions.
+
+`promotion-request-v2` is also backend-neutral: baseline and candidate backend
+names are campaign inputs rather than fixed engine assumptions.

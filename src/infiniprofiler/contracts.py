@@ -527,6 +527,17 @@ def _parse_mechanism_check(raw: Any, errors: List[str]) -> MechanismCheck:
     )
 
 
+def parse_lever_contract(raw: Mapping[str, Any]) -> LeverContract:
+    """Parse and validate a promotion lever contract."""
+    errors: List[str] = []
+    row = _object(raw, errors, "lever_contract")
+    lever = _parse_lever_contract(row, errors)
+    if errors:
+        raise ContractValidationError(errors)
+    assert lever is not None
+    return lever
+
+
 def validate_promotion_request_v2(document: Mapping[str, Any]) -> Dict[str, Any]:
     """Validate an AutoHelix v2 request, including its required lever contract."""
     errors: List[str] = []
@@ -583,6 +594,13 @@ def validate_promotion_request_v2(document: Mapping[str, Any]) -> Dict[str, Any]
             errors.append("lever_contract.top_path must match diagnosis.top_path")
         if lever.top_path != row.get("promote", {}).get("one_path"):
             errors.append("lever_contract.top_path must match promote.one_path")
+        gate_threshold = gate.get("surpass_threshold")
+        if (
+            isinstance(gate_threshold, (int, float))
+            and not isinstance(gate_threshold, bool)
+            and gate_threshold != lever.wall_ratio_gt
+        ):
+            errors.append("gate.surpass_threshold must equal lever_contract.wall_gate.ratio_gt")
 
     promote = _object(row.get("promote"), errors, "promote")
     _required(promote, ("one_path", "may_apply", "must_reobserve_unprofiled"), errors, "promote")
@@ -592,6 +610,16 @@ def validate_promotion_request_v2(document: Mapping[str, Any]) -> Dict[str, Any]
         errors.append("promote.must_reobserve_unprofiled must be true")
 
     mechanism = _parse_mechanism_check(row.get("mechanism_check", {"status": "NOT_RUN"}), errors)
+    if mechanism.status != "NOT_RUN":
+        for key in ("before_profile_ref", "after_profile_ref"):
+            if not getattr(mechanism, key):
+                errors.append(f"mechanism_check.{key} is required when status is {mechanism.status}")
+        if not mechanism.results:
+            errors.append(f"mechanism_check.results is required when status is {mechanism.status}")
+    if lever is not None and len(lever.expected_signals) != len(
+        {signal.name for signal in lever.expected_signals}
+    ):
+        errors.append("lever_contract.expected_signals contains duplicate names")
     if errors:
         raise ContractValidationError(errors)
     return {

@@ -364,6 +364,11 @@ Mechanism status is one of:
 AutoHelix must not claim success from wall movement alone. The durable iteration
 record contains both mechanism check and unprofiled wall result.
 
+The implemented bridge resolves expected signals from timing attribution, rank
+views, or explicit scheduler spans. It requires the same window identity, model,
+campaign, and source-root hash before and after. Timing movement is inconclusive
+unless both profiles use explicitly correlated exclusive attribution.
+
 ## P0 sequencing
 
 | Milestone | Deliverable | Gate |
@@ -374,7 +379,7 @@ record contains both mechanism check and unprofiled wall result.
 | P0-D | Rank merge and TP imbalance facts (**done**) | Graph-replay boundary matching, coarse fallback, and synthetic straggler tests pass |
 | P0-E | InfiniLM sidecar spans and parser rules (**done**) | Canonical names, window identity, null producer, unknown-span warnings, and metric-only suppression tests pass |
 | P0-F | Source map and graph ranking rule (**done**) | Engine-neutral rules, exact source hits, paired graph replay gate, and source-path precedence tests pass |
-| P0-G | Mechanism check bridge | AutoHelix iteration records wall and mechanism independently |
+| P0-G | Mechanism check bridge (**done**) | `promotion-request-2`, before/after signal evaluation, and movement classification tests pass |
 
 P0-C starts immediately after contract freeze because exclusive graph
 attribution is the highest-value feature.

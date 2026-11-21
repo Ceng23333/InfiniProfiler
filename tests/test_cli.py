@@ -73,6 +73,98 @@ def test_cli_detects_and_validates_promotion_request_v2(tmp_path, capsys):
     assert '"top_path": "graph.source_guard"' in capsys.readouterr().out
 
 
+def test_cli_emits_and_evaluates_mechanism_request_v2(tmp_path):
+    from infiniprofiler.models import Capture, HostSignal, ProfileDocument
+    from tests.test_mechanism import GRAPH_TIMING, LEVER, SOURCE_MAP, before_after
+
+    document = ProfileDocument(capture=Capture(source="hctracer"))
+    document.host_signals.append(
+        HostSignal(family="graph", candidate=3100, baseline=100, ratio=31.0, source="hctracer")
+    )
+    profile = tmp_path / "profile.json"
+    wall = tmp_path / "compare.json"
+    lever = tmp_path / "lever.json"
+    timing = tmp_path / "timing.json"
+    source_map = tmp_path / "source-map.json"
+    before = tmp_path / "before.json"
+    after = tmp_path / "after.json"
+    request = tmp_path / "request-v2.json"
+    updated = tmp_path / "request-v2-moved.json"
+    profile.write_text(json.dumps(document.to_dict()), encoding="utf-8")
+    wall.write_text(json.dumps({"ratio": 0.5}), encoding="utf-8")
+    lever.write_text(json.dumps(LEVER), encoding="utf-8")
+    timing.write_text(json.dumps(GRAPH_TIMING), encoding="utf-8")
+    source_map.write_text(json.dumps(SOURCE_MAP), encoding="utf-8")
+    before_doc, after_doc = before_after()
+    before.write_text(json.dumps(before_doc), encoding="utf-8")
+    after.write_text(json.dumps(after_doc), encoding="utf-8")
+
+    rc = main(
+        [
+            "promotion-request-v2",
+            "--profile",
+            str(profile),
+            "--wall-compare",
+            str(wall),
+            "--lever-contract",
+            str(lever),
+            "--window-id",
+            "window-0",
+            "--profile-ref",
+            "profile/candidate.json",
+            "--before-profile",
+            str(before),
+            "--after-profile",
+            str(after),
+            "--before-profile-ref",
+            "profile/before.json",
+            "--after-profile-ref",
+            "profile/after.json",
+            "--campaign-id",
+            "campaign",
+            "--baseline-pin",
+            "frozen",
+            "--candidate-pin",
+            "candidate",
+            "--iteration",
+            "0",
+            "--baseline-backend",
+            "engine-frozen",
+            "--candidate-backend",
+            "engine-candidate",
+            "--timing-attribution",
+            str(timing),
+            "--source-map",
+            str(source_map),
+            "--output",
+            str(request),
+        ]
+    )
+
+    assert rc == 0
+    initial = json.loads(request.read_text(encoding="utf-8"))
+    assert initial["schema_version"] == "promotion-request-2"
+    assert initial["mechanism_check"]["status"] == "MOVED"
+    assert main(
+        [
+            "evaluate-mechanism",
+            "--request",
+            str(request),
+            "--before-profile",
+            str(before),
+            "--after-profile",
+            str(after),
+            "--before-profile-ref",
+            "profile/before.json",
+            "--after-profile-ref",
+            "profile/after.json",
+            "--output",
+            str(updated),
+        ]
+    ) == 0
+    assert json.loads(updated.read_text(encoding="utf-8"))["mechanism_check"]["status"] == "MOVED"
+
+
 def test_cli_reports_contract_errors_without_traceback(tmp_path, capsys):
     path = tmp_path / "invalid.json"
     document = valid_profile()

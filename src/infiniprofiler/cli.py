@@ -26,6 +26,11 @@ from .capture import (
 from .models import ProfileDocument
 from .promotion.autohelix import promotion_request, write_io_compat
 from .promotion.ranker import primary_wall_ratio, rank_paths
+from .promotion.mechanism import (
+    MechanismError,
+    apply_mechanism_evaluation,
+    build_promotion_request_v2,
+)
 from .rank_views import RankViewError, build_rank_views_from_capture
 from .source_map import (
     SourceMapError,
@@ -138,6 +143,38 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
     )
     source_map_parser.add_argument("--output", type=Path, required=True)
+
+    request_v2 = subparsers.add_parser(
+        "promotion-request-v2",
+        help="emit promotion-request-2 with a lever contract",
+    )
+    request_v2.add_argument("--profile", type=Path, required=True)
+    request_v2.add_argument("--wall-compare", type=Path, required=True)
+    request_v2.add_argument("--lever-contract", type=Path, required=True)
+    request_v2.add_argument("--window-id", required=True)
+    request_v2.add_argument("--profile-ref", required=True)
+    request_v2.add_argument("--before-profile", type=Path)
+    request_v2.add_argument("--after-profile", type=Path)
+    request_v2.add_argument("--before-profile-ref", required=True)
+    request_v2.add_argument("--after-profile-ref")
+    request_v2.add_argument("--baseline-backend", default="baseline")
+    request_v2.add_argument("--candidate-backend", default="candidate")
+    request_v2.add_argument("--output", type=Path, required=True)
+    _add_identity_args(request_v2)
+    request_v2.add_argument("--timing-attribution", type=Path)
+    request_v2.add_argument("--source-map", type=Path)
+    request_v2.add_argument("--rank-views", type=Path)
+
+    evaluate = subparsers.add_parser(
+        "evaluate-mechanism",
+        help="evaluate before/after mechanism movement and revalidate request",
+    )
+    evaluate.add_argument("--request", type=Path, required=True)
+    evaluate.add_argument("--before-profile", type=Path, required=True)
+    evaluate.add_argument("--after-profile", type=Path, required=True)
+    evaluate.add_argument("--before-profile-ref", required=True)
+    evaluate.add_argument("--after-profile-ref", required=True)
+    evaluate.add_argument("--output", type=Path, required=True)
 
     rank_capture = subparsers.add_parser(
         "rank-capture",
@@ -383,6 +420,56 @@ def run_build_source_map(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_request_v2(args: argparse.Namespace) -> int:
+    profile = _load_profile(args.profile)
+    after = _load_json(args.after_profile) if args.after_profile else None
+    payload = build_promotion_request_v2(
+        profile,
+        wall_compare=_load_json(args.wall_compare),
+        lever_contract=_load_json(args.lever_contract),
+        window_id=args.window_id,
+        campaign_id=args.campaign_id,
+        model=args.model,
+        host=args.host,
+        device_track=args.device_track,
+        baseline_pin=args.baseline_pin,
+        candidate_pin=args.candidate_pin,
+        iteration=args.iteration,
+        profile_ref=args.profile_ref,
+        before_profile_ref=args.before_profile_ref,
+        after_profile_ref=args.after_profile_ref or "",
+        before=_load_json(args.before_profile) if args.before_profile else None,
+        after=after,
+        baseline_backend=args.baseline_backend,
+        candidate_backend=args.candidate_backend,
+        exhausted=_parse_exhausted(args.exhausted),
+        graph_timing=_load_json(args.timing_attribution) if args.timing_attribution else None,
+        graph_source=_load_json(args.source_map) if args.source_map else None,
+        graph_ranks=_load_json(args.rank_views) if args.rank_views else None,
+    )
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    print(
+        f"wrote {args.output} top_path={payload['diagnosis']['top_path']} "
+        f"mechanism={payload['mechanism_check']['status']}"
+    )
+    return 0
+
+
+def run_evaluate_mechanism(args: argparse.Namespace) -> int:
+    payload = apply_mechanism_evaluation(
+        _load_json(args.request),
+        before=_load_json(args.before_profile),
+        after=_load_json(args.after_profile),
+        before_profile_ref=args.before_profile_ref,
+        after_profile_ref=args.after_profile_ref,
+    )
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    print(f"wrote {args.output} mechanism={payload['mechanism_check']['status']}")
+    return 0
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -398,6 +485,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "attribute-trace": run_attribute_trace,
         "rank-capture": run_rank_capture,
         "build-source-map": run_build_source_map,
+        "promotion-request-v2": run_request_v2,
+        "evaluate-mechanism": run_evaluate_mechanism,
     }
     try:
         return handlers[args.command](args)
@@ -413,4 +502,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 1
     except SourceMapError as exc:
         print(f"source-map error: {exc}", file=sys.stderr)
+        return 2
+    except MechanismError as exc:
+        print(f"mechanism error: {exc}", file=sys.stderr)
         return 2

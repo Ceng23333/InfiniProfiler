@@ -16,6 +16,7 @@ host runtime events cannot be relabeled as scheduler effort.
 | Source mapper | Engine-neutral configured source discovery and exact line provenance |
 | Diagnostics | Compare baseline/candidate families and rank evidence |
 | Promotion bridge | Emit deterministic facts and a one-lever request for AutoHelix |
+| Mechanism bridge | Evaluate declared before/after signals without granting promotion |
 
 ## Profile document
 
@@ -59,6 +60,12 @@ an engine family in its core; campaigns supply exact symbols and provider rules.
 A graph lever is selected only with paired graph replay timing, a source
 guard/provider hit, or rank-aware graph-replay evidence. A large aggregate graph
 ratio alone is not actionable.
+
+The v2 mechanism bridge evaluates only signals declared by the lever contract.
+Before/after artifacts must share window, campaign, model, source-root identity,
+and rank count. Timing movement is inconclusive unless both sides are explicitly
+correlated. Classification is `MOVED`, `NO_CHANGE`, `REGRESSED`, or
+`INCONCLUSIVE`; profiled mechanism movement never satisfies the wall KPI.
 
 ## Naive fallbacks
 

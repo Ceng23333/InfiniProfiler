@@ -68,7 +68,7 @@ def valid_profile():
             },
         ],
         "timing_attribution": {
-            "evidence_mode": "exclusive_union_with_paired_correlation",
+            "evidence_mode": "EXCLUSIVE_UNION_WITH_EXPLICIT_CORRELATION",
             "api_submit_us": 20_000,
             "gpu_execution_us": 1_000_000,
             "launch_latency_us": 5_000,

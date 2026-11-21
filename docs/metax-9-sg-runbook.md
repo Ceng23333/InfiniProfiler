@@ -105,8 +105,46 @@ python3 -m infiniprofiler build-source-map \
 ```
 
 Then pass `--timing-attribution`, `--source-map`, and `--rank-views` to
-`promotion-request`. Without those graph inputs, InfiniProfiler will not turn an
-aggregate graph ratio into a graph lever.
+`promotion-request-v2`. Without those graph inputs, InfiniProfiler will not turn
+an aggregate graph ratio into a graph lever.
+
+Create the lever contract with the selected path, expected signals, source or
+deployment files, correctness gate, rollback, and unprofiled wall threshold.
+Then emit the request:
+
+```bash
+python3 -m infiniprofiler promotion-request-v2 \
+  --profile /path/to/profile/candidate.json \
+  --wall-compare /path/to/suite/compare.json \
+  --lever-contract /path/to/lever.json \
+  --window-id "${WINDOW_ID}" \
+  --profile-ref /path/to/profile/candidate.json \
+  --before-profile /path/to/profile/before.json \
+  --before-profile-ref /path/to/profile/before.json \
+  --campaign-id "${CAMPAIGN_ID}" \
+  --model "${MODEL}" --host "${HOST}" --device-track mars \
+  --baseline-pin "${BASELINE_PIN}" --candidate-pin "${CANDIDATE_PIN}" \
+  --iteration "${ITERATION}" \
+  --timing-attribution /path/to/timing.json \
+  --source-map /path/to/source-map.json \
+  --rank-views /path/to/rank_views.json \
+  --output /path/to/autohelix-request-v2.json
+```
+
+After the candidate rebuild and matched before/after profiles:
+
+```bash
+python3 -m infiniprofiler evaluate-mechanism \
+  --request /path/to/autohelix-request-v2.json \
+  --before-profile /path/to/profile/before.json \
+  --after-profile /path/to/profile/after.json \
+  --before-profile-ref /path/to/profile/before.json \
+  --after-profile-ref /path/to/profile/after.json \
+  --output /path/to/autohelix-request-v2-evaluated.json
+```
+
+AutoHelix may use the mechanism classification to accept, reject, or switch a
+lever, but only a later unprofiled wall ratio above the threshold can promote.
 
 The current runner requires one unique live PID per rank. If InfiniLM implements
 TP ranks as threads in one process, do not attach the same PID multiple times and
