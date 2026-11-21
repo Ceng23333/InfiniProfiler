@@ -45,6 +45,9 @@ python -m infiniprofiler io-compat \
 
 python -m infiniprofiler validate --input profile.json
 python -m infiniprofiler validate --kind promotion-request --input request.json
+
+python -m infiniprofiler attribute-trace \
+  --input trace.json --output timing.json
 ```
 
 `promotion-request` stops after producing facts and the selected lever. It
@@ -57,5 +60,5 @@ python -m pip install -e '.[dev]'
 pytest
 ```
 
-The Python implementation is intentionally dependency-free so it can run
-inside profiler containers with restricted package access.
+The Python implementation has no third-party runtime dependencies; timeline
+staging uses Python's built-in sqlite3 module.

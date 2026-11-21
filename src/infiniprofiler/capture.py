@@ -11,7 +11,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence
 
-from .adapters.hctracer import normalize as normalize_hctracer
+from .timeline import attribute_trace
 
 
 SPEC_SCHEMA = "infiniprofiler-capture-spec-1"
@@ -575,22 +575,23 @@ def merge_capture(out_dir: Path, output_path: Optional[Path] = None) -> Dict[str
         trace_paths = [path for path in trace_paths if path.is_file()]
         if not trace_paths:
             raise CaptureError(f"rank {rank} has no readable raw trace")
-        profile = normalize_hctracer(trace_paths[0], source_name="hctracer", mode="attach", pid=pid)
+        timeline = attribute_trace(
+            trace_paths[0],
+            database_path=trace_paths[0].parent / "infiniprofiler_timeline.sqlite3",
+        )
         rank_summaries.append(
             {
                 "rank": rank,
                 "pid": pid,
                 "raw_trace": str(trace_paths[0]),
                 "raw_bytes": int(rank_status.get("raw_bytes", 0)),
-                "event_count": profile.capture.provenance.get("event_count", 0),
-                "host_totals_us": {
-                    signal.family: signal.candidate for signal in profile.host_signals
-                },
-                "scheduler_signals": [signal.to_dict() for signal in profile.scheduler_signals],
-                "metrics": [metric.to_dict() for metric in profile.metrics],
+                "event_count": timeline.event_count,
+                "correlation_status": timeline.correlation_status,
+                "timing_attribution": timeline.to_dict(),
+                "scheduler_signals": timeline.scheduler_signals,
             }
         )
-        warnings.extend(f"rank={rank}:{warning}" for warning in profile.warnings)
+        warnings.extend(f"rank={rank}:{warning}" for warning in timeline.warnings)
 
     payload = {
         "schema_version": MERGE_SCHEMA,

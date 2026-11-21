@@ -67,6 +67,18 @@ python3 -m infiniprofiler merge-capture \
   --capture-dir /path/to/profile/candidate/window0
 ```
 
+For one raw rank trace, emit exclusive timing attribution with:
+
+```bash
+python3 -m infiniprofiler attribute-trace \
+  --input /path/to/rank=00/raw/tracer_out-0.json \
+  --output /path/to/rank=00/timing_attribution.json
+```
+
+Inspect `evidence_mode` before treating launch latency as exact. If hcTracer did
+not export correlation IDs, output has `correlation_status=UNKNOWN` and adjacent
+timestamp pairing is only a guess.
+
 The current runner requires one unique live PID per rank. If InfiniLM implements
 TP ranks as threads in one process, do not attach the same PID multiple times and
 do not fabricate rank PIDs. Treat that as one process capture until rank-aware

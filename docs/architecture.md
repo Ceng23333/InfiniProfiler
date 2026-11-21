@@ -11,7 +11,7 @@ host runtime events cannot be relabeled as scheduler effort.
 | Layer | Responsibility |
 |---|---|
 | Capture adapters | Start or attach to a bounded capture, collect raw artifacts |
-| Normalizer | Repair and classify traces into `infiniprofiler-profile-1` |
+| Normalizer | Repair and classify traces into v1 and promotion-grade timeline facts |
 | Naive tools | Provide fallback signals when HCTX/CPU stacks are unavailable |
 | Diagnostics | Compare baseline/candidate families and rank evidence |
 | Promotion bridge | Emit deterministic facts and a one-lever request for AutoHelix |
@@ -38,6 +38,14 @@ also extracts `ph=X` marker ranges whose names contain `schedule`, `step`,
 
 If no marker producer is present, the adapter emits a warning and no synthetic
 scheduler spans. This is deliberate.
+
+## Promotion timeline
+
+The v2 timeline path streams `traceEvents` in bounded chunks and stages sortable
+intervals in SQLite. It computes exclusive interval unions for submit, GPU
+execution, synchronization, graph launch, and graph replay device work. It
+pairs submit/device intervals when hcTracer exports a correlation ID; otherwise
+it marks adjacent timestamp pairing as a guess and reports the unpaired count.
 
 ## Naive fallbacks
 

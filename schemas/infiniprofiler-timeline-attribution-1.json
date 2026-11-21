@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://infiniprofiler.dev/schemas/infiniprofiler-timeline-attribution-1.json",
+  "title": "Streaming exclusive timeline attribution",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "evidence_mode",
+    "event_count",
+    "classified_event_count",
+    "api_submit_us",
+    "gpu_execution_us",
+    "launch_latency_us",
+    "sync_wait_us",
+    "graph_launch_us",
+    "graph_replay_device_us",
+    "cpu_gap_before_us",
+    "cpu_gap_after_us",
+    "paired_event_count",
+    "unpaired_event_count",
+    "correlation_status",
+    "host_totals_us",
+    "scheduler_signals",
+    "warnings"
+  ],
+  "properties": {
+    "schema_version": {"const": "infiniprofiler-timeline-attribution-1"},
+    "evidence_mode": {
+      "enum": [
+        "EXCLUSIVE_UNION_WITH_EXPLICIT_CORRELATION",
+        "EXCLUSIVE_UNION_WITH_ADJACENT_GUESS"
+      ]
+    },
+    "event_count": {"type": "integer", "minimum": 0},
+    "classified_event_count": {"type": "integer", "minimum": 0},
+    "api_submit_us": {"type": "number", "minimum": 0},
+    "gpu_execution_us": {"type": "number", "minimum": 0},
+    "launch_latency_us": {"type": "number", "minimum": 0},
+    "sync_wait_us": {"type": "number", "minimum": 0},
+    "graph_launch_us": {"type": "number", "minimum": 0},
+    "graph_replay_device_us": {"type": "number", "minimum": 0},
+    "cpu_gap_before_us": {"type": "number", "minimum": 0},
+    "cpu_gap_after_us": {"type": "number", "minimum": 0},
+    "paired_event_count": {"type": "integer", "minimum": 0},
+    "unpaired_event_count": {"type": "integer", "minimum": 0},
+    "correlation_status": {"enum": ["EXPLICIT", "UNKNOWN"]},
+    "host_totals_us": {"type": "object", "additionalProperties": {"type": "number"}},
+    "scheduler_signals": {"type": "array", "items": {"type": "object"}},
+    "warnings": {"type": "array", "items": {"type": "string"}},
+    "database": {"type": "string"}
+  }
+}

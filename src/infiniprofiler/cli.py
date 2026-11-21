@@ -28,6 +28,7 @@ from .promotion.autohelix import promotion_request, write_io_compat
 from .promotion.ranker import primary_wall_ratio, rank_paths
 from .tools.sidecar import normalize as normalize_sidecar
 from .tools.process_sampler import discover_pids, sample_interval, write_jsonl
+from .timeline import attribute_trace
 
 
 def _load_json(path: Path) -> dict:
@@ -103,6 +104,13 @@ def build_parser() -> argparse.ArgumentParser:
     merge = subparsers.add_parser("merge-capture", help="normalize and merge one successful capture")
     merge.add_argument("--capture-dir", type=Path, required=True)
     merge.add_argument("--output", type=Path)
+
+    attribute = subparsers.add_parser(
+        "attribute-trace",
+        help="stream one trace and emit exclusive timing attribution",
+    )
+    attribute.add_argument("--input", type=Path, required=True)
+    attribute.add_argument("--output", type=Path, required=True)
     return parser
 
 
@@ -298,6 +306,17 @@ def run_merge_capture(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_attribute_trace(args: argparse.Namespace) -> int:
+    timeline = attribute_trace(args.input)
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(
+        json.dumps(timeline.to_dict(), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    print(f"wrote {args.output} evidence_mode={timeline.evidence_mode}")
+    return 0
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -307,6 +326,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "promotion-request": run_request,
         "io-compat": run_io_compat,
         "validate": run_validate,
+        "capture-campaign": run_capture,
+        "compare-capture-manifests": run_compare_capture,
+        "merge-capture": run_merge_capture,
+        "attribute-trace": run_attribute_trace,
     }
     try:
         return handlers[args.command](args)

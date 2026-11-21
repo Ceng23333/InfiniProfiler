@@ -85,7 +85,7 @@ def test_successful_two_rank_capture_writes_shared_window_manifest(tmp_path):
     capture = capture_campaign(
         capture_spec(),
         tmp_path / "run",
-        ready_seconds=0.1,
+        ready_seconds=0.4,
         stop_wait_seconds=2.0,
         tracer_command=tracer_command(tracer),
     )
@@ -192,7 +192,7 @@ def test_merge_capture_normalizes_required_ranks(tmp_path):
     capture_campaign(
         capture_spec(),
         run_dir,
-        ready_seconds=0.1,
+        ready_seconds=0.4,
         stop_wait_seconds=2.0,
         tracer_command=tracer_command(tracer),
     )
@@ -201,6 +201,7 @@ def test_merge_capture_normalizes_required_ranks(tmp_path):
     assert merged["status"] == "COMPLETE"
     assert merged["rank_count"] == 2
     assert [rank["rank"] for rank in merged["ranks"]] == [0, 1]
+    assert all(rank["timing_attribution"]["event_count"] == 0 for rank in merged["ranks"])
     assert (run_dir / "capture_merge.json").is_file()
 
 
