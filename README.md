@@ -15,6 +15,11 @@ See [docs/metax-9-sg-runbook.md](docs/metax-9-sg-runbook.md) for the first live
 development target and [docs/roadmap.md](docs/roadmap.md) for the staged
 Qwen3-8B promotion gate.
 
+For the promotion-grade feature set, see
+[docs/p0-p1-plan.md](docs/p0-p1-plan.md). It defines the smallest Nsight-like
+evidence chain needed to make and verify one safe lever choice, not full Nsight
+Systems parity.
+
 ## Contracts
 
 - `infiniprofiler-profile-1` is the normalized capture document.

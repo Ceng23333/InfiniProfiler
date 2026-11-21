@@ -8,6 +8,11 @@
 - Dependency-free sidecar parser/producer and `/proc` fallback sampler.
 - AutoHelix `promotion-request-1` with `stop_before_promote=true`.
 
+Promotion-grade P0/P1 work is specified separately in
+[p0-p1-plan.md](p0-p1-plan.md). Profile/request v1 remains frozen while v2 adds
+matched-window identity, rank-aware exclusive timing, source mapping, and a
+mechanism check.
+
 ## M1 - metax-9-sg capture bring-up
 
 1. Locate the live Qwen3-8B InfiniLM GPU-worker PID.
