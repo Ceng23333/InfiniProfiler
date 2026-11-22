@@ -27,6 +27,48 @@ Systems parity.
 - Existing `promo-facts-1` remains the durable campaign format. The IO
   compatibility writer only adds facts through documented optional fields.
 
+## Design
+
+InfiniProfiler is organized as a thin universal evidence layer with narrow
+engine and vendor adapters. Capture adapters may emit vendor-specific events,
+but their output is normalized into stable profile, timeline, rank, source-map,
+and promotion contracts. Core ranking and mechanism checks do not assume an
+engine family; engine-specific span names, source symbols, providers, pins, and
+backend identities are supplied as campaign configuration.
+
+Evidence is separated by mechanism and strength:
+
+| Layer | Evidence |
+|---|---|
+| Client wall | Unprofiled throughput, TTFT, ITL, success, and promotion KPI |
+| Runtime | API submit, launch command, graph launch, synchronization, and CPU gaps |
+| Device | Exclusive GPU execution and graph-replay device time |
+| Scheduler | Explicit HCTX/marker or sidecar spans; never inferred from host gaps |
+| Tensor parallel | Per-rank timing, start skew, tail skew, straggler wait, and imbalance |
+| Source | Exact file/line provenance for graph guards, provider selection, and entry points |
+
+The capture path is transactional and matched: every required rank starts before
+one shared client window and stops even when another rank, client, or interrupt
+fails. Baseline and candidate manifests must agree on campaign, workload, pins,
+rank set, warmup policy, and window duration before merging.
+
+Timing facts distinguish aggregate overlap from exclusive interval union and
+explicitly paired latency. Streaming hcTracer parsing stages intervals in SQLite,
+recovers complete events from truncated captures, and marks adjacent pairing as a
+guess unless hcTracer exported a correlation ID.
+
+Promotion is a closed loop with an ownership boundary. InfiniProfiler observes,
+normalizes, ranks, declares a lever contract, and evaluates whether the expected
+mechanism moved. AutoHelix owns lever selection, rebuild, acceptance, rejection,
+and budget. A profiled mechanism result can diagnose progress, but only an
+unprofiled wall KPI above the configured threshold can promote.
+
+The v2 request requires a lever contract with expected signals, source or
+deployment scope, correctness gate, rollback, and unprofiled wall threshold.
+Before/after mechanism evaluation checks matching window, campaign, model,
+source-root identity, and rank count. Missing, mismatched, or weakly correlated
+evidence becomes `INCONCLUSIVE` rather than an actionable lever.
+
 ## Commands
 
 ```bash
