@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
 from ..models import ProfileDocument
-from .ranker import LEVERS, primary_wall_ratio, rank_paths
+from .ranker import primary_wall_ratio, rank_paths
 
 
 REQUEST_SCHEMA = "promotion-request-1"
@@ -42,11 +42,14 @@ def promotion_request(
         if provenance.get("windows_matched") is False:
             raise ValueError("naive-sidecar baseline/candidate windows do not match; P0 request rejected")
     wall_ratio = primary_wall_ratio(wall_compare)
+    timing = graph_timing
+    if timing is None and profile.timing_attribution is not None:
+        timing = profile.timing_attribution.to_dict()
     backlog = rank_paths(
         profile,
         wall_ratio=wall_ratio,
         exhausted=exhausted,
-        graph_timing=graph_timing,
+        graph_timing=timing,
         graph_source=graph_source,
         graph_ranks=graph_ranks,
     )
@@ -74,7 +77,8 @@ def promotion_request(
             "profile_warnings": profile.warnings,
             "wall_ratio": wall_ratio,
             "wall_compare": wall_compare,
-            "graph_timing": graph_timing,
+            "timing_attribution": timing,
+            "graph_timing": timing,
             "graph_source": graph_source,
             "graph_ranks": graph_ranks,
         },
@@ -105,11 +109,14 @@ def write_io_compat(
 ) -> Dict[str, Path]:
     """Write namespaced compare/backlog data compatible with IO promo parsing."""
     wall_ratio = primary_wall_ratio(wall_compare)
+    timing = graph_timing
+    if timing is None and profile.timing_attribution is not None:
+        timing = profile.timing_attribution.to_dict()
     backlog = rank_paths(
         profile,
         wall_ratio=wall_ratio,
         exhausted=exhausted,
-        graph_timing=graph_timing,
+        graph_timing=timing,
         graph_source=graph_source,
         graph_ranks=graph_ranks,
     )
@@ -120,8 +127,7 @@ def write_io_compat(
         "vendor_profiler": profile.capture.source,
         "parser": "infiniprofiler",
         "host_signals": host_signals,
-        # Unknown optional fields are ignored safely by promo-facts-1 consumers.
-        "scheduler_signals": [item.to_dict() for item in profile.scheduler_signals],
+        "timing_attribution": timing,
         "metrics": [item.to_dict() for item in profile.metrics],
         "warnings": profile.warnings,
     }

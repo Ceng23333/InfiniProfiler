@@ -588,7 +588,6 @@ def merge_capture(out_dir: Path, output_path: Optional[Path] = None) -> Dict[str
                 "event_count": timeline.event_count,
                 "correlation_status": timeline.correlation_status,
                 "timing_attribution": timeline.to_dict(),
-                "scheduler_signals": timeline.scheduler_signals,
             }
         )
         warnings.extend(f"rank={rank}:{warning}" for warning in timeline.warnings)

@@ -23,7 +23,6 @@
     "trace_end_us",
     "graph_replay_boundaries",
     "host_totals_us",
-    "scheduler_signals",
     "warnings"
   ],
   "properties": {
@@ -74,7 +73,6 @@
       }
     },
     "host_totals_us": {"type": "object", "additionalProperties": {"type": "number"}},
-    "scheduler_signals": {"type": "array", "items": {"type": "object"}},
     "warnings": {"type": "array", "items": {"type": "string"}},
     "database": {"type": "string"}
   }

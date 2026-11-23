@@ -12,7 +12,6 @@
     "timing_attribution",
     "source_map",
     "host_signals",
-    "scheduler_signals",
     "metrics",
     "warnings"
   ],
@@ -22,10 +21,9 @@
     "window": {"$ref": "#/$defs/window"},
     "workload": {"$ref": "#/$defs/workload"},
     "ranks": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/rankView"}},
-    "timing_attribution": {"$ref": "#/$defs/timingAttribution"},
+    "timing_attribution": {"$ref": "infiniprofiler-profile-1.json#/$defs/timingAttribution"},
     "source_map": {"$ref": "#/$defs/sourceMap"},
     "host_signals": {"type": "array", "items": {"$ref": "infiniprofiler-profile-1.json#/$defs/hostSignal"}},
-    "scheduler_signals": {"type": "array", "items": {"$ref": "infiniprofiler-profile-1.json#/$defs/schedulerSignal"}},
     "metrics": {"type": "array", "items": {"$ref": "infiniprofiler-profile-1.json#/$defs/engineMetric"}},
     "warnings": {"type": "array", "items": {"type": "string"}}
   },
@@ -119,34 +117,6 @@
         "granularity": {"type": "string"},
         "boundary_count": {"type": "integer", "minimum": 0},
         "boundary_status": {"enum": ["UNMATCHED", "MATCHED_GRAPH_REPLAY"]}
-      }
-    },
-    "timingAttribution": {
-      "type": "object",
-      "required": [
-        "evidence_mode",
-        "api_submit_us",
-        "gpu_execution_us",
-        "launch_latency_us",
-        "sync_wait_us",
-        "graph_launch_us",
-        "graph_replay_device_us",
-        "cpu_gap_before_us",
-        "cpu_gap_after_us",
-        "unpaired_event_count"
-      ],
-      "properties": {
-        "evidence_mode": {"type": "string", "minLength": 1},
-        "api_submit_us": {"type": "number", "minimum": 0},
-        "gpu_execution_us": {"type": "number", "minimum": 0},
-        "launch_latency_us": {"type": "number", "minimum": 0},
-        "sync_wait_us": {"type": "number", "minimum": 0},
-        "graph_launch_us": {"type": "number", "minimum": 0},
-        "graph_replay_device_us": {"type": "number", "minimum": 0},
-        "cpu_gap_before_us": {"type": "number", "minimum": 0},
-        "cpu_gap_after_us": {"type": "number", "minimum": 0},
-        "unpaired_event_count": {"type": "integer", "minimum": 0},
-        "paired_event_count": {"type": "integer", "minimum": 0}
       }
     },
     "sourceMap": {

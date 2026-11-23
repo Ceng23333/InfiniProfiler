@@ -1,4 +1,4 @@
-"""Minimal producer API for engines without HCTX instrumentation."""
+"""Minimal producer API for engines emitting metrics without HCTX spans."""
 
 from __future__ import annotations
 
@@ -9,11 +9,13 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, Iterator, Optional, Union
 
-from ..scheduler import CANONICAL_SPANS
-
 
 class SidecarSpanRecorder:
-    """Append explicit engine ranges to a JSONL file."""
+    """Append engine ranges/metrics to a JSONL file.
+
+    Span rows are retained for provenance only; promotion ranking uses metrics
+    and exclusive timing attribution, never InfiniLM-prefixed span contracts.
+    """
 
     def __init__(
         self,
@@ -38,8 +40,8 @@ class SidecarSpanRecorder:
 
     @contextmanager
     def span(self, name: str, **fields: Any) -> Iterator[None]:
-        if name not in CANONICAL_SPANS:
-            raise ValueError(f"sidecar span must be canonical, got {name!r}")
+        if not name:
+            raise ValueError("sidecar span name must be non-empty")
         span_id = self._next_span_id()
         start_ns = time.perf_counter_ns()
         try:

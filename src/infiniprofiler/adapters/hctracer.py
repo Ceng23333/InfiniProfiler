@@ -1,21 +1,20 @@
-"""Chrome-trace normalizer for hcTracer smoke and attach captures."""
+"""Chrome-trace normalizer for hcTracer/mcTracer captures."""
 
 from __future__ import annotations
 
 import json
 import re
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from ..models import (
     Capture,
     EngineMetric,
     HostSignal,
     ProfileDocument,
-    SchedulerSignal,
+    TimingAttributionFields,
     safe_ratio,
 )
-from ..scheduler import canonical_scheduler_family
 
 
 API_RE = re.compile(r"^(hc|mc|cuda|cu)[A-Z]", re.IGNORECASE)
@@ -121,66 +120,11 @@ def extract_host_totals_us(doc: Dict[str, Any]) -> Dict[str, float]:
     return totals
 
 
-def _scheduler_span_totals(doc: Dict[str, Any]) -> Tuple[Dict[Tuple[str, str], Dict[str, float]], Dict[Tuple[str, str], Set[int]]]:
-    spans: Dict[Tuple[str, str], Dict[str, float]] = {}
-    ranks: Dict[Tuple[str, str], Set[int]] = {}
-    for event in _events(doc):
-        name = str(event.get("name") or "")
-        duration = _duration(event)
-        family = canonical_scheduler_family(name)
-        if duration <= 0 or family is None:
-            continue
-        key = (family, name)
-        item = spans.setdefault(
-            key,
-            {"total_us": 0.0, "count": 0.0, "max_us": 0.0},
-        )
-        item["total_us"] += duration
-        item["count"] += 1
-        item["max_us"] = max(item["max_us"], duration)
-        rank = _number(event, "rank")
-        if rank is not None:
-            ranks.setdefault(key, set()).add(int(rank))
-
-    return spans, ranks
-
-
-def extract_scheduler_signals(
-    doc: Dict[str, Any],
-    baseline_spans: Optional[Dict[Tuple[str, str], Dict[str, float]]] = None,
-) -> List[SchedulerSignal]:
-    spans, ranks = _scheduler_span_totals(doc)
-
-    output: List[SchedulerSignal] = []
-    for (family, name), item in sorted(spans.items()):
-        count = int(item["count"])
-        baseline_us = (
-            float(baseline_spans[(family, name)]["total_us"])
-            if baseline_spans and (family, name) in baseline_spans
-            else None
-        )
-        output.append(
-            SchedulerSignal(
-                family=family,
-                name=name,
-                candidate_us=item["total_us"],
-                count=count,
-                baseline_us=baseline_us,
-                ratio=safe_ratio(item["total_us"], baseline_us) if baseline_us else None,
-                source="hctracer.marker",
-                ranks=sorted(ranks.get((family, name), set())),
-                sample={
-                    "avg_us": item["total_us"] / count,
-                    "max_us": item["max_us"],
-                },
-            )
-        )
-    return output
-
-
 def _host_signals(
     totals: Dict[str, float],
     baseline: Optional[Dict[str, float]],
+    *,
+    source: str = "hctracer",
 ) -> List[HostSignal]:
     output: List[HostSignal] = []
     for family in ("driver", "runtime", "command", "api", "gap", "graph"):
@@ -195,10 +139,24 @@ def _host_signals(
                 candidate=candidate,
                 baseline=base,
                 ratio=ratio,
-                source="hctracer",
+                source=source,
             )
         )
     return output
+
+
+def _note_optional_markers(doc: Dict[str, Any], warnings: List[str]) -> None:
+    """Record free-form marker names in warnings only; never as a contract."""
+    names = sorted(
+        {
+            str(event.get("name") or "")
+            for event in _events(doc)
+            if SCHEDULER_RE.search(str(event.get("name") or ""))
+            and _duration(event) > 0
+        }
+    )
+    if names:
+        warnings.append("optional_marker_names_not_contract:" + ",".join(names[:8]))
 
 
 def normalize(
@@ -209,22 +167,59 @@ def normalize(
     pid: Optional[int] = None,
     baseline_path: Optional[Path] = None,
 ) -> ProfileDocument:
+    from ..timeline import attribute_trace
+
     doc, warnings = load_chrome_trace(input_path)
     totals = extract_host_totals_us(doc)
     baseline_totals = None
-    baseline_scheduler_spans = None
     if baseline_path is not None:
         baseline_doc, baseline_warnings = load_chrome_trace(baseline_path)
         baseline_totals = extract_host_totals_us(baseline_doc)
-        baseline_scheduler_spans, _ = _scheduler_span_totals(baseline_doc)
         warnings.extend("baseline:" + item for item in baseline_warnings)
 
-    scheduler = extract_scheduler_signals(doc, baseline_scheduler_spans)
-    if not scheduler:
-        warnings.append(
-            "no_scheduler_annotations: the trace has no canonical InfiniLM "
-            "HCTX/marker ranges; host gaps are not scheduler evidence"
+    _note_optional_markers(doc, warnings)
+
+    timeline = attribute_trace(
+        input_path,
+        database_path=input_path.parent / f"{input_path.stem}.timeline.sqlite3",
+    )
+    for warning in timeline.warnings:
+        if warning not in warnings:
+            warnings.append(warning)
+
+    baseline_timing = None
+    if baseline_path is not None:
+        baseline_timeline = attribute_trace(
+            baseline_path,
+            database_path=baseline_path.parent / f"{baseline_path.stem}.timeline.sqlite3",
         )
+        baseline_timing = TimingAttributionFields(
+            evidence_mode=baseline_timeline.evidence_mode,
+            api_submit_us=baseline_timeline.api_submit_us,
+            gpu_execution_us=baseline_timeline.gpu_execution_us,
+            launch_latency_us=baseline_timeline.launch_latency_us,
+            sync_wait_us=baseline_timeline.sync_wait_us,
+            graph_launch_us=baseline_timeline.graph_launch_us,
+            graph_replay_device_us=baseline_timeline.graph_replay_device_us,
+            cpu_gap_before_us=baseline_timeline.cpu_gap_before_us,
+            cpu_gap_after_us=baseline_timeline.cpu_gap_after_us,
+            unpaired_event_count=baseline_timeline.unpaired_event_count,
+            paired_event_count=baseline_timeline.paired_event_count,
+        )
+
+    timing = TimingAttributionFields(
+        evidence_mode=timeline.evidence_mode,
+        api_submit_us=timeline.api_submit_us,
+        gpu_execution_us=timeline.gpu_execution_us,
+        launch_latency_us=timeline.launch_latency_us,
+        sync_wait_us=timeline.sync_wait_us,
+        graph_launch_us=timeline.graph_launch_us,
+        graph_replay_device_us=timeline.graph_replay_device_us,
+        cpu_gap_before_us=timeline.cpu_gap_before_us,
+        cpu_gap_after_us=timeline.cpu_gap_after_us,
+        unpaired_event_count=timeline.unpaired_event_count,
+        paired_event_count=timeline.paired_event_count,
+    )
 
     capture = Capture(
         source=source_name,
@@ -234,6 +229,11 @@ def normalize(
             "input": str(input_path),
             "baseline_input": str(baseline_path) if baseline_path else None,
             "event_count": len(doc.get("traceEvents") or []),
+            "correlation_status": timeline.correlation_status,
+            "timeline_database": timeline.database,
+            "baseline_timing_attribution": (
+                baseline_timing.to_dict() if baseline_timing is not None else None
+            ),
         },
     )
     metrics: List[EngineMetric] = []
@@ -241,12 +241,12 @@ def normalize(
     for name in ("tokens_per_iteration", "batch_size", "queue_depth"):
         value = _number(args, name)
         if value is not None:
-            metrics.append(EngineMetric(name=name, candidate=value, source="hctracer"))
+            metrics.append(EngineMetric(name=name, candidate=value, source=source_name))
 
     return ProfileDocument(
         capture=capture,
-        host_signals=_host_signals(totals, baseline_totals),
-        scheduler_signals=scheduler,
+        host_signals=_host_signals(totals, baseline_totals, source=source_name),
+        timing_attribution=timing,
         metrics=metrics,
         warnings=warnings,
     )

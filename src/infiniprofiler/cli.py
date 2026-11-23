@@ -16,6 +16,7 @@ from .contracts import (
     validate_promotion_request_v2,
 )
 from .adapters.hctracer import normalize as normalize_hctracer
+from .adapters.nsys_sqlite import normalize as normalize_nsys
 from .capture import (
     CaptureError,
     CaptureSpec,
@@ -23,7 +24,7 @@ from .capture import (
     compare_capture_manifests,
     merge_capture,
 )
-from .models import ProfileDocument
+from .models import NORMALIZE_SCHEMA, ProfileDocument
 from .promotion.autohelix import promotion_request, write_io_compat
 from .promotion.ranker import primary_wall_ratio, rank_paths
 from .promotion.mechanism import (
@@ -67,11 +68,16 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     normalize = subparsers.add_parser("normalize", help="normalize a raw capture")
-    normalize.add_argument("--source", required=True, choices=["hctracer", "naive-sidecar"])
+    normalize.add_argument(
+        "--source",
+        required=True,
+        choices=["hctracer", "mctracer", "nsys", "naive-sidecar"],
+    )
     normalize.add_argument("--input", type=Path, required=True)
     normalize.add_argument("--baseline", type=Path)
     normalize.add_argument("--mode", default=None)
     normalize.add_argument("--pid", type=int)
+    normalize.add_argument("--expected-ranks", type=int, default=1)
     normalize.add_argument("--output", type=Path, required=True)
 
     sample = subparsers.add_parser("sample-process", help="run the naive /proc sampler")
@@ -196,19 +202,47 @@ def _parse_exhausted(raw: str) -> list:
     return [item.strip() for item in raw.split(",") if item.strip()]
 
 
+def _print_timing_summary(profile: ProfileDocument) -> None:
+    timing = profile.timing_attribution
+    if timing is None:
+        print(
+            f"host_signals={len(profile.host_signals)} metrics={len(profile.metrics)} "
+            f"warnings={len(profile.warnings)} timing_attribution=missing"
+        )
+        return
+    print(
+        f"host_signals={len(profile.host_signals)} metrics={len(profile.metrics)} "
+        f"warnings={len(profile.warnings)} "
+        f"api_submit_us={timing.api_submit_us:.3f} "
+        f"gpu_execution_us={timing.gpu_execution_us:.3f} "
+        f"sync_wait_us={timing.sync_wait_us:.3f} "
+        f"graph_launch_us={timing.graph_launch_us:.3f}"
+    )
+
+
 def run_normalize(args: argparse.Namespace) -> int:
-    if args.source == "hctracer":
+    if args.source in ("hctracer", "mctracer"):
         profile = normalize_hctracer(
             args.input,
+            source_name=args.source,
             mode=args.mode or "attach",
             pid=args.pid,
             baseline_path=args.baseline,
         )
+    elif args.source == "nsys":
+        profile = normalize_nsys(
+            args.input,
+            expected_ranks=args.expected_ranks,
+            mode=args.mode or "nsys",
+            baseline_path=args.baseline,
+        )
     else:
-        profile = normalize_sidecar(args.input, baseline_path=args.baseline, mode=args.mode or "sidecar")
+        profile = normalize_sidecar(
+            args.input, baseline_path=args.baseline, mode=args.mode or "sidecar"
+        )
     profile.write_json(args.output)
     print(f"wrote {args.output}")
-    print(f"host_signals={len(profile.host_signals)} scheduler_signals={len(profile.scheduler_signals)} warnings={len(profile.warnings)}")
+    _print_timing_summary(profile)
     return 0
 
 
@@ -233,11 +267,14 @@ def run_sample(args: argparse.Namespace) -> int:
 def _load_profile(path: Path) -> ProfileDocument:
     from dataclasses import fields
 
-    from .models import Capture, EngineMetric, HostSignal, SchedulerSignal
+    from .models import Capture, EngineMetric, HostSignal, TimingAttributionFields
 
     raw = _load_json(path)
-    if raw.get("schema_version") != "infiniprofiler-profile-1":
-        raise ValueError("unsupported profile schema_version")
+    schema = raw.get("schema_version")
+    if schema not in (NORMALIZE_SCHEMA, "infiniprofiler-normalize-1"):
+        raise ValueError(
+            f"unsupported profile schema_version for normalize load: {schema}"
+        )
     capture_raw = raw.get("capture")
     if not isinstance(capture_raw, dict):
         raise ValueError("profile.capture must be an object")
@@ -246,13 +283,17 @@ def _load_profile(path: Path) -> ProfileDocument:
     profile = ProfileDocument(capture=capture)
     for key, model in (
         ("host_signals", HostSignal),
-        ("scheduler_signals", SchedulerSignal),
         ("metrics", EngineMetric),
     ):
         for item in raw.get(key) or []:
             if isinstance(item, dict):
                 allowed = {field.name for field in fields(model)}
-                getattr(profile, key).append(model(**{k: v for k, v in item.items() if k in allowed}))
+                getattr(profile, key).append(
+                    model(**{k: v for k, v in item.items() if k in allowed})
+                )
+    timing_raw = raw.get("timing_attribution")
+    if isinstance(timing_raw, dict):
+        profile.timing_attribution = TimingAttributionFields.from_mapping(timing_raw)
     profile.warnings = [str(item) for item in raw.get("warnings") or []]
     return profile
 
@@ -335,18 +376,21 @@ def run_validate(args: argparse.Namespace) -> int:
                 "campaign_id": profile.workload.campaign_id,
                 "ranks": len(profile.ranks),
                 "unpaired_events": profile.timing.unpaired_event_count,
-                "scheduler_signals": len(profile.scheduler_signals),
+                "api_submit_us": profile.timing.api_submit_us,
+                "gpu_execution_us": profile.timing.gpu_execution_us,
+                "sync_wait_us": profile.timing.sync_wait_us,
                 "warnings": profile.warnings,
             }
-        elif schema == "infiniprofiler-profile-1":
+        elif schema == NORMALIZE_SCHEMA:
             profile = _load_profile(args.input)
+            timing = profile.timing_attribution
             summary = {
                 "schema_version": profile.schema_version,
                 "kind": "profile",
                 "source": profile.capture.source,
                 "host_signals": len(profile.host_signals),
-                "scheduler_signals": len(profile.scheduler_signals),
                 "metrics": len(profile.metrics),
+                "timing_attribution": timing.to_dict() if timing else None,
                 "warnings": profile.warnings,
             }
         else:

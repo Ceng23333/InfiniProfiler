@@ -15,7 +15,6 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, Iterator, List, Mapping, Optional, Sequence, Tuple
 
 from .adapters.hctracer import API_RE, GRAPH_RE, KERNEL_RE, MEMCPY_RE, SCHEDULER_RE
-from .scheduler import canonical_scheduler_family
 
 
 TIMELINE_SCHEMA = "infiniprofiler-timeline-attribution-1"
@@ -44,7 +43,6 @@ class TimelineAttribution:
     unpaired_event_count: int
     correlation_status: str
     host_totals_us: Dict[str, float]
-    scheduler_signals: List[Dict[str, Any]]
     warnings: List[str]
     database: Optional[str] = None
     trace_start_us: Optional[float] = None
@@ -452,28 +450,6 @@ def _graph_replay_boundaries(connection: sqlite3.Connection) -> List[Dict[str, A
     return boundaries
 
 
-def _scheduler_signal(
-    key: Tuple[str, str],
-    aggregate: Dict[str, Any],
-    ranks: set,
-) -> Dict[str, Any]:
-    family, name = key
-    count = int(aggregate["count"])
-    total = float(aggregate["total_us"])
-    return {
-        "family": family,
-        "name": name,
-        "candidate_us": total,
-        "count": count,
-        "source": "hctracer.marker",
-        "ranks": sorted(ranks),
-        "sample": {
-            "avg_us": total / count,
-            "max_us": aggregate["max_us"],
-        },
-    }
-
-
 def attribute_trace(
     input_path: Path,
     *,
@@ -511,8 +487,7 @@ def attribute_trace(
     event_count = 0
     classified = 0
     warnings: List[str] = []
-    scheduler: Dict[Tuple[str, str], Dict[str, Any]] = {}
-    scheduler_ranks: Dict[Tuple[str, str], set] = {}
+    optional_markers: List[str] = []
     host_totals = {
         "api": 0.0,
         "command": 0.0,
@@ -548,20 +523,8 @@ def attribute_trace(
         correlation = _correlation(event)
         lowered = name.lower()
 
-        scheduler_family = canonical_scheduler_family(name)
-        if scheduler_family is not None:
-            family = scheduler_family
-            key = (family, name)
-            aggregate = scheduler.setdefault(
-                key,
-                {"total_us": 0.0, "count": 0, "max_us": 0.0},
-            )
-            aggregate["total_us"] += duration
-            aggregate["count"] += 1
-            aggregate["max_us"] = max(float(aggregate["max_us"]), duration)
-            rank = _number(event, ("rank",))
-            if rank is not None:
-                scheduler_ranks.setdefault(key, set()).add(int(rank))
+        if SCHEDULER_RE.search(name) and name not in optional_markers:
+            optional_markers.append(name)
 
         if GRAPH_RE.search(name):
             host_totals["graph"] += duration
@@ -619,13 +582,9 @@ def attribute_trace(
         if unpaired:
             warnings.append("no_explicit_correlation_ids_launch_latency_is_adjacent_guess")
 
-    scheduler_signals = [
-        _scheduler_signal(key, scheduler[key], scheduler_ranks.get(key, set()))
-        for key in sorted(scheduler)
-    ]
-    if not scheduler_signals:
+    if optional_markers:
         warnings.append(
-            "no_scheduler_annotations: host gaps are not scheduler evidence"
+            "optional_marker_names_not_contract:" + ",".join(sorted(optional_markers)[:8])
         )
 
     attribution = TimelineAttribution(
@@ -645,7 +604,6 @@ def attribute_trace(
         unpaired_event_count=unpaired,
         correlation_status=correlation_status,
         host_totals_us=host_totals,
-        scheduler_signals=scheduler_signals,
         warnings=warnings,
         database=str(database_path),
         trace_start_us=trace_start,

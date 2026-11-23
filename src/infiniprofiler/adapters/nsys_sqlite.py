@@ -526,3 +526,130 @@ def export_rank_traces(
     finally:
         connection.close()
     return {"truth": truth, "rank_files": rank_files}
+
+
+def timing_attribution_from_rank_truth(rank: Mapping[str, Any]) -> Dict[str, Any]:
+    """Map one NsysRankTruth row into the shared timing_attribution object."""
+    unpaired = int(rank.get("unpaired_device_event_count") or 0)
+    paired = int(rank.get("paired_device_event_count") or 0)
+    correlation = str(rank.get("correlation_status") or "UNKNOWN")
+    evidence_mode = (
+        "EXCLUSIVE_UNION_WITH_EXPLICIT_CORRELATION"
+        if correlation == "EXPLICIT" and unpaired == 0
+        else "EXCLUSIVE_UNION_WITH_ADJACENT_GUESS"
+    )
+    runtime_api = float(rank.get("runtime_api_us") or 0.0)
+    return {
+        "evidence_mode": evidence_mode,
+        "api_submit_us": runtime_api,
+        "gpu_execution_us": float(rank.get("gpu_execution_us") or 0.0),
+        "launch_latency_us": 0.0,
+        "sync_wait_us": float(rank.get("sync_wait_us") or 0.0),
+        "graph_launch_us": float(rank.get("graph_launch_us") or 0.0),
+        "graph_replay_device_us": 0.0,
+        "cpu_gap_before_us": 0.0,
+        "cpu_gap_after_us": 0.0,
+        "unpaired_event_count": unpaired,
+        "paired_event_count": paired,
+    }
+
+
+def timing_attribution_from_truth(truth: Mapping[str, Any]) -> Dict[str, Any]:
+    """Aggregate per-rank Nsight truth into one timing_attribution object."""
+    ranks = truth.get("ranks") if isinstance(truth.get("ranks"), list) else []
+    if not ranks:
+        return timing_attribution_from_rank_truth({})
+    totals = {
+        "api_submit_us": 0.0,
+        "gpu_execution_us": 0.0,
+        "sync_wait_us": 0.0,
+        "graph_launch_us": 0.0,
+        "unpaired_event_count": 0,
+        "paired_event_count": 0,
+    }
+    explicit = True
+    for rank in ranks:
+        if not isinstance(rank, Mapping):
+            continue
+        item = timing_attribution_from_rank_truth(rank)
+        totals["api_submit_us"] += float(item["api_submit_us"])
+        totals["gpu_execution_us"] += float(item["gpu_execution_us"])
+        totals["sync_wait_us"] += float(item["sync_wait_us"])
+        totals["graph_launch_us"] += float(item["graph_launch_us"])
+        totals["unpaired_event_count"] += int(item["unpaired_event_count"])
+        totals["paired_event_count"] += int(item["paired_event_count"])
+        if item["evidence_mode"] != "EXCLUSIVE_UNION_WITH_EXPLICIT_CORRELATION":
+            explicit = False
+    return {
+        "evidence_mode": (
+            "EXCLUSIVE_UNION_WITH_EXPLICIT_CORRELATION"
+            if explicit
+            else "EXCLUSIVE_UNION_WITH_ADJACENT_GUESS"
+        ),
+        "api_submit_us": totals["api_submit_us"],
+        "gpu_execution_us": totals["gpu_execution_us"],
+        "launch_latency_us": 0.0,
+        "sync_wait_us": totals["sync_wait_us"],
+        "graph_launch_us": totals["graph_launch_us"],
+        "graph_replay_device_us": 0.0,
+        "cpu_gap_before_us": 0.0,
+        "cpu_gap_after_us": 0.0,
+        "unpaired_event_count": totals["unpaired_event_count"],
+        "paired_event_count": totals["paired_event_count"],
+    }
+
+
+def normalize(
+    input_path: Path,
+    *,
+    expected_ranks: int = 1,
+    mode: str = "nsys",
+    baseline_path: Optional[Path] = None,
+) -> "ProfileDocument":
+    """Normalize an Nsight SQLite export into a timing-first profile document."""
+    from ..models import Capture, HostSignal, ProfileDocument, TimingAttributionFields, safe_ratio
+
+    truth = summarize_truth(input_path, expected_ranks)
+    timing_raw = timing_attribution_from_truth(truth)
+    baseline_timing = None
+    warnings: List[str] = []
+    if baseline_path is not None:
+        baseline_truth = summarize_truth(baseline_path, expected_ranks)
+        baseline_timing = timing_attribution_from_truth(baseline_truth)
+
+    host_signals: List[HostSignal] = []
+    for family, key in (
+        ("api", "api_submit_us"),
+        ("runtime", "api_submit_us"),
+        ("graph", "graph_launch_us"),
+    ):
+        candidate = float(timing_raw.get(key) or 0.0)
+        baseline = float(baseline_timing.get(key) or 0.0) if baseline_timing else None
+        if candidate <= 0 and (baseline is None or baseline <= 0):
+            continue
+        host_signals.append(
+            HostSignal(
+                family=family,
+                candidate=candidate,
+                baseline=baseline,
+                ratio=safe_ratio(candidate, baseline) if baseline else None,
+                source="nsys",
+            )
+        )
+
+    provenance: Dict[str, Any] = {
+        "input": str(input_path),
+        "expected_ranks": expected_ranks,
+        "rank_count": truth.get("rank_count"),
+        "nsys_truth_schema": truth.get("schema_version"),
+    }
+    if baseline_timing is not None:
+        provenance["baseline_timing_attribution"] = baseline_timing
+        provenance["baseline_input"] = str(baseline_path)
+
+    return ProfileDocument(
+        capture=Capture(source="nsys", mode=mode, provenance=provenance),
+        host_signals=host_signals,
+        timing_attribution=TimingAttributionFields.from_mapping(timing_raw),
+        warnings=warnings,
+    )

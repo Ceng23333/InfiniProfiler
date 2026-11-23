@@ -1,15 +1,14 @@
 # InfiniProfiler
 
 InfiniProfiler is a thin profiling abstraction for InfiniLM performance
-promotion. It turns vendor traces and lightweight sidecar observations into one
-stable profile document, then emits a promotion backlog that AutoHelix can
-consume.
+promotion. It turns vendor traces (hcTracer/mcTracer/Nsight) and optional
+engine metrics into one timing-first profile document, then emits a promotion
+backlog that AutoHelix can consume.
 
-The initial target is Mars: live `hcTracer --attach` captures are useful
-GPU/runtime timelines, but they do not expose scheduler-level LLM effort unless
-the engine emits HCTX ranges or a sidecar supplies them. InfiniProfiler keeps
-host signals separate from scheduler signals and never treats launch gaps or
-command time as scheduling effort.
+Primary evidence is exclusive timeline attribution (`api_submit_us`,
+`gpu_execution_us`, `sync_wait_us`, graph launch/replay, CPU gaps). Engine
+metrics may hint packing/queue; InfiniProfiler never ranks on canonical
+`infinilm:` scheduler spans.
 
 See [docs/metax-9-sg-runbook.md](docs/metax-9-sg-runbook.md) for the first live
 development target and [docs/roadmap.md](docs/roadmap.md) for the staged
@@ -22,8 +21,9 @@ Systems parity.
 
 ## Contracts
 
-- `infiniprofiler-profile-1` is the normalized capture document.
-- `promotion-request-1` is the deterministic hand-off to AutoHelix.
+- `infiniprofiler-normalize-1` is the timing-first normalize output.
+- `infiniprofiler-profile-2` is the promotion-grade matched-window document.
+- `promotion-request-1` / `promotion-request-2` hand off to AutoHelix.
 - Existing `promo-facts-1` remains the durable campaign format. The IO
   compatibility writer only adds facts through documented optional fields.
 
@@ -36,16 +36,19 @@ and promotion contracts. Core ranking and mechanism checks do not assume an
 engine family; engine-specific span names, source symbols, providers, pins, and
 backend identities are supplied as campaign configuration.
 
-Evidence is separated by mechanism and strength:
+Evidence is separated by strength (Nsight-pattern first):
 
 | Layer | Evidence |
 |---|---|
 | Client wall | Unprofiled throughput, TTFT, ITL, success, and promotion KPI |
-| Runtime | API submit, launch command, graph launch, synchronization, and CPU gaps |
-| Device | Exclusive GPU execution and graph-replay device time |
-| Scheduler | Explicit HCTX/marker or sidecar spans; never inferred from host gaps |
+| L1 Nsight-truth | Exclusive API submit, GPU execution, sync wait, graph launch/replay, CPU gaps |
+| L2 Engine metrics | Optional packing/queue hints; never gated on InfiniLM span names |
+| L3 Engine ranges | Optional NVTX/HCTX/sidecar ranges as provenance only — not `scheduler_signals` |
 | Tensor parallel | Per-rank timing, start skew, tail skew, straggler wait, and imbalance |
 | Source | Exact file/line provenance for graph guards, provider selection, and entry points |
+
+CUDA idle gaps are never mapped to packing or scheduler effort. Acceptance for
+the Nsight-matched path is host `A100` via `scripts/compare_nsys_gate.py`.
 
 The capture path is transactional and matched: every required rank starts before
 one shared client window and stops even when another rank, client, or interrupt
@@ -76,7 +79,10 @@ python -m infiniprofiler normalize \
   --source hctracer --input trace.json --output profile.json
 
 python -m infiniprofiler normalize \
-  --source naive-sidecar --input scheduler.jsonl --output profile.json
+  --source nsys --input report.sqlite --expected-ranks 4 --output profile.json
+
+python -m infiniprofiler normalize \
+  --source naive-sidecar --input metrics.jsonl --output profile.json
 
 python -m infiniprofiler promotion-request \
   --profile profile.json --wall-compare compare.json \

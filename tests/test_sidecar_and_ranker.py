@@ -6,7 +6,7 @@ from infiniprofiler.models import (
     EngineMetric,
     HostSignal,
     ProfileDocument,
-    SchedulerSignal,
+    TimingAttributionFields,
 )
 from infiniprofiler.promotion.autohelix import promotion_request, write_io_compat
 from infiniprofiler.promotion.ranker import primary_wall_ratio, rank_paths
@@ -22,14 +22,6 @@ def sidecar(path, candidate=True):
             "start_ns": 1_000_000,
             "end_ns": 2_000_000,
             "rank": 0,
-        },
-        {
-            "type": "span",
-            "name": "infinilm:batch_build",
-            "window_id": "window-0",
-            "duration_us": 100,
-            "rank": 1,
-            "queue_depth": 8 if candidate else 2,
         },
         {
             "type": "metric",
@@ -52,23 +44,18 @@ def sidecar(path, candidate=True):
     return path
 
 
-def test_sidecar_normalizes_scheduler_and_engine_ratios(tmp_path):
+def test_sidecar_normalizes_engine_metrics_only(tmp_path):
     candidate = sidecar(tmp_path / "candidate.jsonl")
     baseline = sidecar(tmp_path / "baseline.jsonl", candidate=False)
     profile = normalize(candidate, baseline_path=baseline)
 
-    assert profile.scheduler("step_control").candidate_us == 1000
-    assert profile.scheduler("batch_packing").ratio == 1.0
-    assert profile.scheduler("step_control").ranks == [0]
-    assert profile.scheduler("batch_packing").ranks == [1]
     assert profile.metric("tokens_per_iteration").ratio == 0.5
     assert profile.metric("queue_depth").ratio == 4.0
     assert any("invalid_jsonl_line" in warning for warning in profile.warnings)
-    batch_signal = profile.scheduler("batch_packing")
-    assert batch_signal.sample["structured"]["queue_depth"]["avg"] == 8.0
+    assert any("sidecar_span_ignored_not_promotion_evidence" in warning for warning in profile.warnings)
 
 
-def test_unknown_scheduler_span_is_warning_not_fact(tmp_path):
+def test_unknown_span_is_warning_not_fact(tmp_path):
     path = tmp_path / "spans.jsonl"
     path.write_text(
         "\n".join(
@@ -83,10 +70,10 @@ def test_unknown_scheduler_span_is_warning_not_fact(tmp_path):
                 ),
                 json.dumps(
                     {
-                        "type": "span",
-                        "name": "infinilm:schedule",
+                        "type": "metric",
+                        "name": "queue_depth",
+                        "value": 4,
                         "window_id": "window-0",
-                        "duration_us": 40,
                     }
                 ),
             ]
@@ -96,8 +83,11 @@ def test_unknown_scheduler_span_is_warning_not_fact(tmp_path):
     )
     profile = normalize(path)
 
-    assert [signal.name for signal in profile.scheduler_signals] == ["infinilm:schedule"]
-    assert "unknown_scheduler_span_ignored:1:scheduler.foo" in profile.warnings
+    assert profile.metric("queue_depth").candidate == 4
+    assert any(
+        "sidecar_span_ignored_not_promotion_evidence:1:scheduler.foo" in warning
+        for warning in profile.warnings
+    )
 
 
 def test_promotion_request_rejects_missing_sidecar_window(tmp_path):
@@ -105,9 +95,9 @@ def test_promotion_request_rejects_missing_sidecar_window(tmp_path):
     path.write_text(
         json.dumps(
             {
-                "type": "span",
-                "name": "infinilm:schedule",
-                "duration_us": 40,
+                "type": "metric",
+                "name": "queue_depth",
+                "value": 4,
             }
         )
         + "\n",
@@ -136,10 +126,10 @@ def test_promotion_request_rejects_mismatched_sidecar_windows(tmp_path):
     candidate.write_text(
         json.dumps(
             {
-                "type": "span",
-                "name": "infinilm:schedule",
+                "type": "metric",
+                "name": "queue_depth",
+                "value": 4,
                 "window_id": "candidate-window",
-                "duration_us": 40,
             }
         )
         + "\n",
@@ -148,10 +138,10 @@ def test_promotion_request_rejects_mismatched_sidecar_windows(tmp_path):
     baseline.write_text(
         json.dumps(
             {
-                "type": "span",
-                "name": "infinilm:schedule",
+                "type": "metric",
+                "name": "queue_depth",
+                "value": 2,
                 "window_id": "baseline-window",
-                "duration_us": 40,
             }
         )
         + "\n",
@@ -174,37 +164,48 @@ def test_promotion_request_rejects_mismatched_sidecar_windows(tmp_path):
         )
 
 
-def test_ranker_prioritizes_explicit_scheduler_evidence():
+def test_ranker_prioritizes_metric_only_packing_hint():
     profile = ProfileDocument(capture=Capture(source="test"))
     profile.metrics.append(
         EngineMetric(name="tokens_per_iteration", candidate=20, baseline=40, ratio=0.5)
     )
-    profile.scheduler_signals.append(
-        SchedulerSignal(
-            family="batch_packing",
-            name="infinilm:batch_build",
-            candidate_us=100,
-            baseline_us=100,
-            ratio=1.0,
-            count=1,
-            source="naive-sidecar",
-        )
-    )
     result = rank_paths(profile, wall_ratio=0.5)
 
-    assert result["top_path"] == "scheduler.batch_packing"
-    assert result["host_first_fired"] is False
+    assert result["top_path"] == "engine.batch_packing"
     assert result["ranked"][0]["lever"].startswith("tune admission/batch packing")
 
 
-def test_metric_only_scheduler_data_does_not_select_scheduler_path():
-    profile = ProfileDocument(capture=Capture(source="naive-sidecar"))
-    profile.metrics.append(
-        EngineMetric(name="tokens_per_iteration", candidate=20, baseline=40, ratio=0.5)
+def test_ranker_sync_wait_path_from_matched_timing():
+    profile = ProfileDocument(
+        capture=Capture(
+            source="test",
+            provenance={
+                "baseline_timing_attribution": {
+                    "evidence_mode": "EXCLUSIVE_UNION_WITH_EXPLICIT_CORRELATION",
+                    "api_submit_us": 10,
+                    "gpu_execution_us": 100,
+                    "launch_latency_us": 0,
+                    "sync_wait_us": 100,
+                    "graph_launch_us": 0,
+                    "graph_replay_device_us": 0,
+                    "cpu_gap_before_us": 0,
+                    "cpu_gap_after_us": 0,
+                    "unpaired_event_count": 0,
+                    "paired_event_count": 1,
+                }
+            },
+        ),
+        timing_attribution=TimingAttributionFields(
+            evidence_mode="EXCLUSIVE_UNION_WITH_EXPLICIT_CORRELATION",
+            sync_wait_us=200,
+            api_submit_us=10,
+            gpu_execution_us=100,
+        ),
     )
     result = rank_paths(profile, wall_ratio=0.5)
 
-    assert result["top_path"] == "diagnosis.insufficient_evidence"
+    assert result["top_path"] == "runtime.sync_wait"
+    assert "scheduler" not in result["top_path"]
 
 
 def test_runtime_gap_is_not_promoted_as_scheduler_effort():
@@ -214,8 +215,17 @@ def test_runtime_gap_is_not_promoted_as_scheduler_effort():
     )
     result = rank_paths(profile, wall_ratio=0.5)
 
-    assert result["top_path"] == "runtime.host_graph_command"
+    assert result["top_path"] == "runtime.host_gap"
+    assert "scheduler" not in result["top_path"]
     assert result["host_first_fired"] is True
+
+
+def test_insufficient_evidence_cites_timing_not_spans():
+    profile = ProfileDocument(capture=Capture(source="test"))
+    result = rank_paths(profile, wall_ratio=1.0)
+
+    assert result["top_path"] == "diagnosis.insufficient_evidence"
+    assert "timing" in result["ranked"][0]["reasons"][0]
 
 
 def test_promotion_request_stops_before_autohelix_applies_a_lever(tmp_path):
@@ -223,16 +233,10 @@ def test_promotion_request_stops_before_autohelix_applies_a_lever(tmp_path):
     profile.metrics.append(
         EngineMetric(name="tokens_per_iteration", candidate=20, baseline=40, ratio=0.4)
     )
-    profile.scheduler_signals.append(
-        SchedulerSignal(
-            family="batch_packing",
-            name="infinilm:batch_build",
-            candidate_us=40,
-            baseline_us=100,
-            ratio=0.4,
-            count=1,
-            source="naive-sidecar",
-        )
+    profile.timing_attribution = TimingAttributionFields(
+        evidence_mode="EXCLUSIVE_UNION_WITH_EXPLICIT_CORRELATION",
+        api_submit_us=10,
+        gpu_execution_us=100,
     )
     compare = {"walls": [{"metric": "output_token_throughput", "ratio": 0.4, "primary": True}]}
     request = promotion_request(
@@ -251,7 +255,8 @@ def test_promotion_request_stops_before_autohelix_applies_a_lever(tmp_path):
     assert request["stop_before_promote"] is True
     assert request["promote"]["may_apply"] is False
     assert request["promote"]["must_reobserve_unprofiled"] is True
-    assert request["diagnosis"]["ranked"][0]["reasons"][0].endswith("candidate/baseline=0.400")
+    assert request["observation"]["timing_attribution"]["api_submit_us"] == 10
+    assert request["diagnosis"]["ranked"][0]["path_id"] == "engine.batch_packing"
 
 
 def test_io_compat_preserves_host_family_shape(tmp_path):
@@ -268,6 +273,7 @@ def test_io_compat_preserves_host_family_shape(tmp_path):
 
     assert compare["host_signals"][0]["family"] == "command"
     assert compare["host_signals"][0]["ratio"] == 2.0
+    assert "scheduler_signals" not in compare
     assert json.loads(paths["backlog"].read_text(encoding="utf-8"))["host_first_fired"] is True
 
 

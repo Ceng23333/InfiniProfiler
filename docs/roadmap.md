@@ -1,64 +1,63 @@
 # Roadmap
 
-## M0 - Normalized abstraction (done)
+## M0 - Timing-first normalized abstraction (done)
 
-- `infiniprofiler-profile-1` in-memory model and JSON schema.
-- hcTracer Chrome-trace normalization with truncated capture recovery.
-- Explicit HCTX/marker extraction into scheduler signals.
-- Dependency-free sidecar parser/producer and `/proc` fallback sampler.
-- AutoHelix `promotion-request-1` with `stop_before_promote=true`.
+- `infiniprofiler-normalize-1` / `infiniprofiler-profile-2` timing-attribution
+  contracts (profile-1 smoke retired).
+- hcTracer/mcTracer Chrome-trace normalization with truncated capture recovery.
+- Streaming exclusive timeline attribution (`api_submit_us`, `gpu_execution_us`,
+  `sync_wait_us`, graph launch/replay, CPU gaps).
+- Nsight SQLite adapter mapping CUPTI truth into the same timing buckets.
+- Metrics-only sidecar parser/producer and `/proc` fallback sampler.
+- AutoHelix request emission with `stop_before_promote=true`.
 
-Promotion-grade P0/P1 work is specified separately in
-[p0-p1-plan.md](p0-p1-plan.md). Profile/request v1 remains frozen while v2 adds
-matched-window identity, rank-aware exclusive timing, source mapping, and a
-mechanism check.
+Promotion-grade matched-window, rank, source-map, and mechanism work is
+specified in [p0-p1-plan.md](p0-p1-plan.md). Ranking uses exclusive timing
+ratios and optional engine metrics — never `infinilm:` scheduler span contracts.
 
-## M1 - metax-9-sg capture bring-up
+## M1 - A100 Nsight-matched capture (done / continuing)
 
-1. Locate the live Qwen3-8B InfiniLM GPU-worker PID.
-2. Run a bounded hcTracer smoke, then one short attach window.
-3. Confirm `raw/tracer_out*.json` is produced and normalized.
-4. Record whether the trace contains real scheduler markers.
+1. Matched vLLM TP4 Qwen3-8B BF16 windows on host `A100` (GPUs 0–3).
+2. `compare_nsys_gate.py` PASS on timing families only.
+3. Harden capture env export / root-owned merge finish path.
+4. Emit profile-2 + AutoHelix request from matched nsys merges.
 
-Exit: one normalized profile exists under a run directory with capture
-provenance and no invented scheduler ranges.
+Exit: closed L1 timing loop on A100 without scheduler-span dependence.
 
-## M2 - InfiniLM sidecar producer
+## M2 - Engine metrics sidecar (optional L2)
 
-Add `SidecarSpanRecorder` ranges around:
+Emit `tokens_per_iteration`, `batch_size`, and `queue_depth` at the matched
+window boundary. Sidecar spans may appear for provenance (L3) but are not
+promotion evidence; packing/queue paths are metric-only hints.
 
-- schedule/admission
-- batch build
-- step loop
-- model forward
-- sampler
+Exit: baseline and candidate sidecars share window identity and metric names.
 
-Co-emit `tokens_per_iteration`, `batch_size`, and `queue_depth` at the same
-window boundary. This is the short-term replacement until InfiniLM emits HCTX
-natively.
+## M3 - Optional engine ranges (L3 provenance)
 
-Exit: baseline and candidate sidecars use the same names, rank ids, and clock
-window.
+Prototype NVTX/HCTX/sidecar ranges around host loops. Ingest into
+provenance/warnings only. A future `engine.span_*` rank path requires matched
+A/B ranges and explicit thresholds — still never inferred from CUDA gaps.
 
-## M3 - Matched A/B integration
+Exit: ranges visible in artifacts; ranker does not invent `scheduler.*`.
 
-Use the existing deterministic promotion wall first. Only invoke hcTracer and
-the sidecar when the wall regresses. Feed one baseline and one candidate
-profile into `promotion-request`, then write the IO-compatible compare/backlog.
+## M4 - Matched A/B + AutoHelix campaign
 
-Exit: `runtime.host_graph_command` and scheduler paths remain separate in the
-ranked backlog.
+Use the unprofiled promotion wall first. Invoke nsys/hcTracer/sidecar when the
+wall regresses. Feed one baseline and one candidate profile into
+`promotion-request`, then write the IO-compatible compare/backlog.
 
-## M4 - AutoHelix campaign
-
-AutoHelix consumes `promotion-request-1`, chooses at most one lever, rebuilds
-or restarts InfiniLM, then re-observes without profiler overhead.
-
-Exit: iterations are recorded with accepted/rejected levers and unprofiled wall
-ratios.
+Exit: `runtime.*` timing paths and `engine.*` metric hints remain separate in
+the ranked backlog. AutoHelix consumes the request with `stop_before_promote`.
 
 ## M5 - Qwen3-8B InfiniLM promotion gate
 
 Promotion is reportable only when the unprofiled primary wall ratio is greater
-than the operator threshold, and all wall guardrails pass. A profiled scheduler
-span improvement alone is a diagnosis, not a promotion.
+than the operator threshold, and all wall guardrails pass. A profiled timing
+improvement alone is a diagnosis, not a promotion.
+
+## Acceptance gate (NVIDIA A100)
+
+Matched Nsight Systems vs InfiniProfiler TP4 compare on host `A100` using
+`scripts/compare_nsys_gate.py`. PASS requires timing-family thresholds only —
+no dependence on `scheduler_signals` / `infinilm:` spans. Showroom mcTracer is
+optional smoke, not the gate.

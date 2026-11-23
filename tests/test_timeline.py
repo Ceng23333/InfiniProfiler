@@ -177,7 +177,7 @@ def test_unpaired_adjacency_is_marked_as_guess(tmp_path):
     assert "no_explicit_correlation_ids_launch_latency_is_adjacent_guess" in timeline.warnings
 
 
-def test_scheduler_markers_are_collected_during_streaming(tmp_path):
+def test_optional_markers_are_warnings_not_scheduler_contract(tmp_path):
     path = trace_file(
         tmp_path,
         "scheduler.json",
@@ -187,15 +187,18 @@ def test_scheduler_markers_are_collected_during_streaming(tmp_path):
                 "ph": "X",
                 "ts": 0,
                 "dur": 40,
+                "pid": 1,
                 "args": {"rank": 2},
             }
         ],
     )
     timeline = attribute_trace(path, database_path=tmp_path / "timeline.db")
 
-    assert timeline.scheduler_signals[0]["family"] == "step_control"
-    assert timeline.scheduler_signals[0]["candidate_us"] == 40
-    assert timeline.scheduler_signals[0]["ranks"] == [2]
+    assert not hasattr(timeline, "scheduler_signals") or getattr(
+        timeline, "scheduler_signals", None
+    ) in (None, [])
+    assert any("optional_marker_names_not_contract" in warning for warning in timeline.warnings)
+    assert "infinilm:schedule" in timeline.warnings[0]
 
 
 def test_streaming_reader_processes_large_trace_without_full_list(tmp_path):

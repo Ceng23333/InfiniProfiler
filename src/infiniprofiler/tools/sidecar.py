@@ -1,4 +1,4 @@
-"""Parse canonical scheduler spans and engine metrics from JSONL."""
+"""Parse engine metrics from JSONL sidecars (metrics-only for promotion)."""
 
 from __future__ import annotations
 
@@ -6,16 +6,12 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from ..engine_ranges import aggregate_engine_ranges, provenance_payload
 from ..models import (
     Capture,
     EngineMetric,
     ProfileDocument,
-    SchedulerSignal,
     safe_ratio,
-)
-from ..scheduler import (
-    canonical_scheduler_family,
-    scheduler_like,
 )
 
 
@@ -27,25 +23,6 @@ STRUCTURED_FIELDS = (
     "acceptance_count",
     "preempt_count",
 )
-
-
-def _duration_us(item: Dict[str, Any]) -> Optional[float]:
-    if "duration_us" in item:
-        try:
-            return max(0.0, float(item["duration_us"]))
-        except (TypeError, ValueError):
-            return None
-    if "duration_ns" in item:
-        try:
-            return max(0.0, float(item["duration_ns"]) / 1000.0)
-        except (TypeError, ValueError):
-            return None
-    try:
-        start = float(item["start_ns"])
-        end = float(item["end_ns"])
-    except (KeyError, TypeError, ValueError):
-        return None
-    return max(0.0, (end - start) / 1000.0)
 
 
 def _number(item: Dict[str, Any], key: str) -> Optional[float]:
@@ -76,16 +53,11 @@ def _read_jsonl(path: Path) -> Tuple[List[Dict[str, Any]], List[str]]:
 
 def _aggregate(
     rows: List[Dict[str, Any]],
-) -> Tuple[
-    Dict[tuple, Dict[str, Any]],
-    Dict[str, Dict[str, Any]],
-    List[str],
-    set,
-]:
-    scheduler: Dict[tuple, Dict[str, Any]] = {}
+) -> Tuple[Dict[str, Dict[str, Any]], List[str], set, List[Dict[str, Any]]]:
     metrics: Dict[str, Dict[str, Any]] = {}
     warnings: List[str] = []
     window_ids: set = set()
+    span_rows: List[Dict[str, Any]] = []
 
     for line_number, row in enumerate(rows, 1):
         kind = str(row.get("type") or "")
@@ -95,54 +67,11 @@ def _aggregate(
 
         if kind == "span":
             name = str(row.get("name") or "")
-            duration = _duration_us(row)
-            family = canonical_scheduler_family(name)
-            if not name or duration is None or family is None:
-                if scheduler_like(name):
-                    warnings.append(
-                        f"unknown_scheduler_span_ignored:{line_number}:{name}"
-                    )
-                else:
-                    warnings.append(f"non_scheduler_span_ignored:{line_number}:{name}")
-                continue
-            if window_id is None:
-                warnings.append(f"span_missing_window_id:{line_number}:{name}")
-            key = (family, name)
-            item = scheduler.setdefault(
-                key,
-                {
-                    "total_us": 0.0,
-                    "count": 0,
-                    "max_us": 0.0,
-                    "ranks": set(),
-                    "structured": {},
-                },
+            warnings.append(
+                f"sidecar_span_provenance_only_not_promotion_evidence:"
+                f"{line_number}:{name or 'unnamed'}"
             )
-            item["total_us"] += duration
-            item["count"] += 1
-            item["max_us"] = max(float(item["max_us"]), duration)
-            rank = _number(row, "rank")
-            if rank is not None:
-                item["ranks"].add(int(rank))
-            for field_name in STRUCTURED_FIELDS:
-                value = _number(row, field_name)
-                if value is None:
-                    continue
-                stats = item["structured"].setdefault(
-                    field_name,
-                    {
-                        "sum": 0.0,
-                        "count": 0,
-                        "min": value,
-                        "max": value,
-                        "last": value,
-                    },
-                )
-                stats["sum"] += value
-                stats["count"] += 1
-                stats["min"] = min(float(stats["min"]), value)
-                stats["max"] = max(float(stats["max"]), value)
-                stats["last"] = value
+            span_rows.append(row)
         elif kind == "metric":
             name = str(row.get("name") or "")
             value = _number(row, "value")
@@ -156,13 +85,19 @@ def _aggregate(
             item["sum"] += value
             item["count"] += 1
             item["max"] = max(float(item["max"]), value)
+            for field_name in STRUCTURED_FIELDS:
+                field_value = _number(row, field_name)
+                if field_value is None:
+                    continue
+                # Structured fields on metric rows are informational only.
+                del field_value
         elif kind in ("start", "stop"):
-            # Window delimiters may carry identity; span rows remain the source
-            # of scheduler facts.
             pass
         else:
             warnings.append(f"unknown_record_type:{line_number}:{kind}")
-    return scheduler, metrics, warnings, window_ids
+    ranges, range_warnings = aggregate_engine_ranges(span_rows)
+    warnings.extend(range_warnings)
+    return metrics, warnings, window_ids, ranges
 
 
 def normalize(
@@ -172,56 +107,24 @@ def normalize(
     mode: str = "sidecar",
 ) -> ProfileDocument:
     rows, warnings = _read_jsonl(input_path)
-    scheduler, metrics, parse_warnings, window_ids = _aggregate(rows)
+    metrics, parse_warnings, window_ids, engine_ranges = _aggregate(rows)
     warnings.extend(parse_warnings)
 
-    baseline_scheduler: Dict[str, Dict[str, Any]] = {}
     baseline_metrics: Dict[str, Dict[str, Any]] = {}
     baseline_windows: set = set()
+    baseline_ranges: List[Dict[str, Any]] = []
     if baseline_path is not None:
         baseline_rows, baseline_warnings = _read_jsonl(baseline_path)
-        baseline_scheduler_raw, baseline_metrics, baseline_parse_warnings, baseline_windows = _aggregate(
-            baseline_rows
-        )
+        (
+            baseline_metrics,
+            baseline_parse_warnings,
+            baseline_windows,
+            baseline_ranges,
+        ) = _aggregate(baseline_rows)
         warnings.extend("baseline:" + item for item in baseline_warnings)
         warnings.extend("baseline:" + item for item in baseline_parse_warnings)
         if len(baseline_windows) != 1:
             warnings.append("baseline:sidecar_window_not_matched")
-        for (family, name), item in baseline_scheduler_raw.items():
-            baseline_scheduler.setdefault(family, {}).setdefault(name, item)
-
-    scheduler_signals: List[SchedulerSignal] = []
-    for (family, name), item in sorted(scheduler.items()):
-        candidate = float(item["total_us"])
-        baseline_names = baseline_scheduler.get(family, {})
-        baseline_item = baseline_names.get(name)
-        baseline = float(baseline_item["total_us"]) if baseline_item else None
-        ranks: List[int] = sorted(item["ranks"])
-        scheduler_signals.append(
-            SchedulerSignal(
-                family=family,
-                name=name,
-                candidate_us=candidate,
-                count=int(item["count"]),
-                baseline_us=baseline,
-                ratio=safe_ratio(candidate, baseline) if baseline else None,
-                source="naive-sidecar",
-                ranks=ranks,
-                sample={
-                    "avg_us": candidate / int(item["count"]),
-                    "max_us": item["max_us"],
-                    "structured": {
-                        field: {
-                            "avg": stats["sum"] / stats["count"],
-                            "min": stats["min"],
-                            "max": stats["max"],
-                            "last": stats["last"],
-                        }
-                        for field, stats in item["structured"].items()
-                    },
-                },
-            )
-        )
 
     metric_signals: List[EngineMetric] = []
     for name, item in sorted(metrics.items()):
@@ -242,9 +145,9 @@ def normalize(
             )
         )
 
-    if not scheduler_signals:
-        warnings.append("no_scheduler_spans: no canonical InfiniLM spans were accepted")
-    matched_window = bool(scheduler_signals) and len(window_ids) == 1
+    if not metric_signals:
+        warnings.append("no_engine_metrics: sidecar produced no metric rows")
+    matched_window = bool(metric_signals) and len(window_ids) == 1
     if not matched_window:
         warnings.append("sidecar_window_not_matched")
 
@@ -254,6 +157,7 @@ def normalize(
         "window_id": next(iter(window_ids)) if len(window_ids) == 1 else None,
         "window_matched": matched_window,
     }
+    provenance.update(provenance_payload(engine_ranges))
     if baseline_path is not None:
         baseline_window_id = next(iter(baseline_windows)) if len(baseline_windows) == 1 else None
         windows_matched = (
@@ -265,6 +169,7 @@ def normalize(
             {
                 "baseline_window_id": baseline_window_id,
                 "windows_matched": windows_matched,
+                "baseline_engine_ranges": baseline_ranges,
             }
         )
         if not windows_matched:
@@ -276,7 +181,6 @@ def normalize(
             mode=mode,
             provenance=provenance,
         ),
-        scheduler_signals=scheduler_signals,
         metrics=metric_signals,
         warnings=warnings,
     )

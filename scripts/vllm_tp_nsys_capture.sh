@@ -23,7 +23,16 @@ PROMPT_LENGTHS="${PROMPT_LENGTHS:-256,512,1024}"
 OUTPUT_LENGTH="${OUTPUT_LENGTH:-256}"
 SEED="${SEED:-42}"
 PROFILES_SOURCE_HASH="${PROFILES_SOURCE_HASH:-vllm-openai-v0.27.1}"
+BASELINE_PIN="${BASELINE_PIN:-${PROFILES_SOURCE_HASH}}"
+CANDIDATE_PIN="${CANDIDATE_PIN:-${PROFILES_SOURCE_HASH}}"
+WALL_WORKLOAD_ID="${WALL_WORKLOAD_ID:-qwen3-8b-mixed-256}"
 READY_TIMEOUT_S="${READY_TIMEOUT_S:-900}"
+
+# Export every value the inlined Python manifest builder reads from os.environ.
+export ROLE WINDOW_ID CAMPAIGN_ID SERVED_MODEL TENSOR_PARALLEL_SIZE
+export CONCURRENCY PROMPT_LENGTHS OUTPUT_LENGTH MAX_NUM_SEQS
+export PROFILES_SOURCE_HASH BASELINE_PIN CANDIDATE_PIN WALL_WORKLOAD_ID
+export WORK_DIR INFINIPROFILER_ROOT
 
 mkdir -p "${WORK_DIR}/nsys" "${WORK_DIR}/client" "${WORK_DIR}/profile"
 SESSION="infiniprofiler_${RUN_ID}"
@@ -185,7 +194,7 @@ spec = {
     "concurrency": int(os.environ["CONCURRENCY"]),
     "prompt_lengths": [int(item) for item in os.environ["PROMPT_LENGTHS"].split(",")],
     "output_lengths": [int(os.environ["OUTPUT_LENGTH"])],
-    "batch_size": int(os.environ["MAX_NUM_SEQS"]),
+    "batch_size": int(os.environ.get("MAX_NUM_SEQS", "16")),
     "clock_policy": "operator_observed",
     "profiles_source_hash": os.environ["PROFILES_SOURCE_HASH"],
     "rank_pids": rank_pids,

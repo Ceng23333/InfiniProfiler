@@ -18,17 +18,29 @@ def write(tmp_path, name, doc):
     return path
 
 
-def test_normalizes_host_and_explicit_scheduler_markers(tmp_path):
+def test_normalizes_host_and_timing_without_scheduler_contract(tmp_path):
     path = write(
         tmp_path,
         "candidate.json",
         trace(
             [
-                {"ph": "X", "name": "hcLaunchKernel", "dur": 200},
-                {"ph": "X", "name": "hcMemcpy", "dur": 100},
-                {"ph": "X", "name": "attention_kernel", "cat": "kernel", "dur": 150},
-                {"ph": "X", "name": "infinilm:batch_build", "dur": 80, "args": {"rank": 3}},
-                {"ph": "X", "name": "infinilm:schedule", "dur": 40, "args": {"rank": 3}},
+                {"ph": "X", "name": "hcLaunchKernel", "dur": 200, "ts": 0, "pid": 1},
+                {"ph": "X", "name": "hcMemcpy", "dur": 100, "ts": 200, "pid": 1},
+                {
+                    "ph": "X",
+                    "name": "attention_kernel",
+                    "cat": "kernel",
+                    "dur": 150,
+                    "ts": 300,
+                    "pid": 1,
+                },
+                {
+                    "ph": "X",
+                    "name": "infinilm:batch_build",
+                    "dur": 80,
+                    "ts": 500,
+                    "args": {"rank": 3},
+                },
             ]
         ),
     )
@@ -36,48 +48,83 @@ def test_normalizes_host_and_explicit_scheduler_markers(tmp_path):
 
     assert profile.host("command").candidate == 200
     assert profile.host("api").candidate == 300
-    assert profile.host("gap").candidate == 50
-    assert {signal.name for signal in profile.scheduler_signals} == {
-        "infinilm:batch_build",
-        "infinilm:schedule",
-    }
-    assert profile.scheduler("batch_packing").ranks == [3]
-    assert not any("no_scheduler_annotations" in warning for warning in profile.warnings)
+    assert profile.timing_attribution is not None
+    assert profile.timing_attribution.gpu_execution_us > 0
+    assert not hasattr(profile, "scheduler_signals")
+    assert any("optional_marker_names_not_contract" in warning for warning in profile.warnings)
+    assert "infinilm:batch_build" in " ".join(profile.warnings)
 
 
-def test_does_not_invent_scheduler_ranges_when_markers_absent(tmp_path):
+def test_trace_without_markers_still_emits_timing(tmp_path):
     path = write(
         tmp_path,
         "candidate.json",
-        trace([{"ph": "X", "name": "hcLaunchKernel", "dur": 500}]),
+        trace(
+            [
+                {
+                    "ph": "X",
+                    "name": "hcLaunchKernel",
+                    "cat": "runtime",
+                    "dur": 500,
+                    "ts": 0,
+                    "pid": 1,
+                }
+            ]
+        ),
     )
     profile = normalize(path)
 
-    assert profile.scheduler_signals == []
+    assert profile.timing_attribution is not None
+    assert profile.timing_attribution.api_submit_us == 500
     assert profile.host("gap").candidate == 500
-    assert any("no_scheduler_annotations" in warning for warning in profile.warnings)
+    assert not any("scheduler_signals" in warning for warning in profile.warnings)
+    assert not any(item["path_id"].startswith("scheduler.") for item in [])
 
 
-def test_compares_matching_scheduler_markers(tmp_path):
+def test_baseline_timing_is_stored_for_matched_ratios(tmp_path):
     baseline = write(
         tmp_path,
         "baseline.json",
-            trace([{"ph": "X", "name": "infinilm:schedule", "dur": 20}]),
+        trace(
+            [
+                {
+                    "ph": "X",
+                    "name": "hcLaunchKernel",
+                    "cat": "runtime",
+                    "dur": 20,
+                    "ts": 0,
+                    "pid": 1,
+                }
+            ]
+        ),
     )
     candidate = write(
         tmp_path,
         "candidate.json",
-            trace([{"ph": "X", "name": "infinilm:schedule", "dur": 40}]),
+        trace(
+            [
+                {
+                    "ph": "X",
+                    "name": "hcLaunchKernel",
+                    "cat": "runtime",
+                    "dur": 40,
+                    "ts": 0,
+                    "pid": 1,
+                }
+            ]
+        ),
     )
     profile = normalize(candidate, baseline_path=baseline)
-    signal = profile.scheduler("step_control")
 
-    assert signal.baseline_us == 20
-    assert signal.ratio == 2.0
+    assert profile.host("api").baseline == 20
+    assert profile.host("api").ratio == 2.0
+    stored = profile.capture.provenance["baseline_timing_attribution"]
+    assert stored["api_submit_us"] == 20
+    assert profile.timing_attribution.api_submit_us == 40
 
 
 def test_recovers_truncated_chrome_trace(tmp_path):
-    complete = '{"traceEvents": [{"ph": "X", "name": "hcLaunchKernel", "dur": 20}'
+    complete = '{"traceEvents": [{"ph": "X", "name": "hcLaunchKernel", "dur": 20, "ts": 0, "pid": 1}'
     path = write(tmp_path, "truncated.json", complete)
     profile = normalize(path)
 

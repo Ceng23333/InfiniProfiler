@@ -60,10 +60,6 @@ def _rank_views(document: Mapping[str, Any]) -> Optional[List[Any]]:
     return None
 
 
-def _scheduler_signals(document: Mapping[str, Any]) -> List[Any]:
-    return document.get("scheduler_signals") if isinstance(document.get("scheduler_signals"), list) else []
-
-
 def _number(value: Any) -> Optional[float]:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
@@ -87,18 +83,21 @@ def _rank_value(document: Mapping[str, Any], name: str) -> Optional[float]:
     return float(statistics.median(values)) if values else None
 
 
-def _scheduler_value(document: Mapping[str, Any], name: str) -> Optional[float]:
-    for item in _scheduler_signals(document):
+def _metric_value(document: Mapping[str, Any], name: str) -> Optional[float]:
+    metrics = document.get("metrics")
+    if not isinstance(metrics, list):
+        return None
+    for item in metrics:
         if not isinstance(item, Mapping) or item.get("name") != name:
             continue
-        if name.endswith("_ratio"):
+        if name.endswith("_ratio") or item.get("ratio") is not None and name.endswith("ratio"):
             return _number(item.get("ratio"))
-        return _number(item.get("candidate_us"))
+        return _number(item.get("candidate"))
     return None
 
 
 def signal_value(document: Mapping[str, Any], signal_name: str) -> Tuple[Optional[float], str]:
-    """Resolve a timing, rank, or scheduler-span signal from an artifact."""
+    """Resolve a timing, rank, or engine-metric signal from an artifact."""
     if signal_name.startswith("timing."):
         timing = _timing(document)
         return (
@@ -107,8 +106,10 @@ def signal_value(document: Mapping[str, Any], signal_name: str) -> Tuple[Optiona
         )
     if signal_name.startswith("rank."):
         return _rank_value(document, signal_name.split(".", 1)[1]), "rank"
+    if signal_name.startswith("metric."):
+        return _metric_value(document, signal_name.split(".", 1)[1]), "metric"
     if signal_name.startswith("scheduler."):
-        return _scheduler_value(document, signal_name.split(".", 1)[1]), "scheduler"
+        return None, "missing"
 
     timing = _timing(document)
     if timing is not None and _timing_value(timing, signal_name) is not None:
@@ -116,9 +117,9 @@ def signal_value(document: Mapping[str, Any], signal_name: str) -> Tuple[Optiona
     rank_value = _rank_value(document, signal_name)
     if rank_value is not None:
         return rank_value, "rank"
-    scheduler_value = _scheduler_value(document, signal_name)
-    if scheduler_value is not None:
-        return scheduler_value, "scheduler"
+    metric_value = _metric_value(document, signal_name)
+    if metric_value is not None:
+        return metric_value, "metric"
     return None, "missing"
 
 
@@ -330,11 +331,14 @@ def build_promotion_request_v2(
             raise MechanismError("naive-sidecar windows do not match; request rejected")
 
     wall_ratio = primary_wall_ratio(wall_compare)
+    timing = graph_timing
+    if timing is None and profile.timing_attribution is not None:
+        timing = profile.timing_attribution.to_dict()
     backlog = rank_paths(
         profile,
         wall_ratio=wall_ratio,
         exhausted=exhausted,
-        graph_timing=graph_timing,
+        graph_timing=timing,
         graph_source=graph_source,
         graph_ranks=graph_ranks,
     )
@@ -374,7 +378,8 @@ def build_promotion_request_v2(
             "window": {"window_id": window_id, "alignment": "MATCHED"},
             "wall_ratio": wall_ratio,
             "wall_compare": dict(wall_compare),
-            "graph_timing": graph_timing,
+            "timing_attribution": timing,
+            "graph_timing": timing,
             "graph_source": graph_source,
             "graph_ranks": graph_ranks,
         },

@@ -1,17 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://infiniprofiler.dev/schemas/infiniprofiler-profile-1.json",
-  "title": "InfiniProfiler normalized profile",
-  "type": "object",
-  "required": ["schema_version", "capture", "host_signals", "scheduler_signals", "metrics", "warnings"],
-  "properties": {
-    "schema_version": {"const": "infiniprofiler-profile-1"},
-    "capture": {"$ref": "#/$defs/capture"},
-    "host_signals": {"type": "array", "items": {"$ref": "#/$defs/hostSignal"}},
-    "scheduler_signals": {"type": "array", "items": {"$ref": "#/$defs/schedulerSignal"}},
-    "metrics": {"type": "array", "items": {"$ref": "#/$defs/engineMetric"}},
-    "warnings": {"type": "array", "items": {"type": "string"}}
-  },
+  "title": "Shared profile field definitions (legacy id retained for $ref stability)",
+  "description": "Document-level profile-1 smoke is retired. This file only hosts shared $defs referenced by profile-2 and normalize outputs.",
   "$defs": {
     "capture": {
       "type": "object",
@@ -39,21 +30,6 @@
         "note": {"type": ["string", "null"]}
       }
     },
-    "schedulerSignal": {
-      "type": "object",
-      "required": ["family", "name", "candidate_us", "count", "source"],
-      "properties": {
-        "family": {"enum": ["step_control", "batch_packing", "queue_admission"]},
-        "name": {"type": "string"},
-        "candidate_us": {"type": "number", "minimum": 0},
-        "baseline_us": {"type": "number", "minimum": 0},
-        "ratio": {"type": "number", "exclusiveMinimum": 0},
-        "count": {"type": "integer", "minimum": 1},
-        "source": {"type": "string"},
-        "ranks": {"type": "array", "items": {"type": "integer", "minimum": 0}},
-        "sample": {"type": "object"}
-      }
-    },
     "engineMetric": {
       "type": "object",
       "required": ["name", "source"],
@@ -64,6 +40,34 @@
         "ratio": {"type": "number"},
         "unit": {"type": "string"},
         "source": {"type": "string"}
+      }
+    },
+    "timingAttribution": {
+      "type": "object",
+      "required": [
+        "evidence_mode",
+        "api_submit_us",
+        "gpu_execution_us",
+        "launch_latency_us",
+        "sync_wait_us",
+        "graph_launch_us",
+        "graph_replay_device_us",
+        "cpu_gap_before_us",
+        "cpu_gap_after_us",
+        "unpaired_event_count"
+      ],
+      "properties": {
+        "evidence_mode": {"type": "string", "minLength": 1},
+        "api_submit_us": {"type": "number", "minimum": 0},
+        "gpu_execution_us": {"type": "number", "minimum": 0},
+        "launch_latency_us": {"type": "number", "minimum": 0},
+        "sync_wait_us": {"type": "number", "minimum": 0},
+        "graph_launch_us": {"type": "number", "minimum": 0},
+        "graph_replay_device_us": {"type": "number", "minimum": 0},
+        "cpu_gap_before_us": {"type": "number", "minimum": 0},
+        "cpu_gap_after_us": {"type": "number", "minimum": 0},
+        "unpaired_event_count": {"type": "integer", "minimum": 0},
+        "paired_event_count": {"type": "integer", "minimum": 0}
       }
     }
   }

@@ -16,14 +16,6 @@ def test_cli_normalizes_and_validates_sidecar(tmp_path, capsys):
             [
                 json.dumps(
                     {
-                        "type": "span",
-                        "name": "infinilm:schedule",
-                        "window_id": "window-0",
-                        "duration_us": 25,
-                    }
-                ),
-                json.dumps(
-                    {
                         "type": "metric",
                         "name": "batch_size",
                         "value": 6,
@@ -49,10 +41,11 @@ def test_cli_normalizes_and_validates_sidecar(tmp_path, capsys):
     captured = capsys.readouterr().out
 
     assert rc == 0
-    assert "scheduler_signals=1" in captured
+    assert "metrics=1" in captured
+    assert "scheduler_signals" not in captured
     assert main(["validate", "--input", str(output)]) == 0
     document = json.loads(output.read_text(encoding="utf-8"))
-    assert document["schema_version"] == "infiniprofiler-profile-1"
+    assert document["schema_version"] == "infiniprofiler-normalize-1"
 
 
 def test_cli_detects_and_validates_profile_v2(tmp_path, capsys):
@@ -63,6 +56,7 @@ def test_cli_detects_and_validates_profile_v2(tmp_path, capsys):
     captured = capsys.readouterr().out
     assert '"schema_version": "infiniprofiler-profile-2"' in captured
     assert '"alignment": "MATCHED"' in captured
+    assert "api_submit_us" in captured
 
 
 def test_cli_detects_and_validates_promotion_request_v2(tmp_path, capsys):
@@ -74,13 +68,14 @@ def test_cli_detects_and_validates_promotion_request_v2(tmp_path, capsys):
 
 
 def test_cli_emits_and_evaluates_mechanism_request_v2(tmp_path):
-    from infiniprofiler.models import Capture, HostSignal, ProfileDocument
+    from infiniprofiler.models import Capture, HostSignal, ProfileDocument, TimingAttributionFields
     from tests.test_mechanism import GRAPH_TIMING, LEVER, SOURCE_MAP, before_after
 
     document = ProfileDocument(capture=Capture(source="hctracer"))
     document.host_signals.append(
         HostSignal(family="graph", candidate=3100, baseline=100, ratio=31.0, source="hctracer")
     )
+    document.timing_attribution = TimingAttributionFields.from_mapping(GRAPH_TIMING)
     profile = tmp_path / "profile.json"
     wall = tmp_path / "compare.json"
     lever = tmp_path / "lever.json"

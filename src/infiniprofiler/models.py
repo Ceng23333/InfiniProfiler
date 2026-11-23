@@ -1,4 +1,4 @@
-"""Stable in-memory representation of infiniprofiler-profile-1."""
+"""Timing-first in-memory representation of normalized InfiniProfiler profiles."""
 
 from __future__ import annotations
 
@@ -7,6 +7,9 @@ from dataclasses import asdict, dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+
+NORMALIZE_SCHEMA = "infiniprofiler-normalize-1"
 
 
 class HostFamily(str, Enum):
@@ -18,12 +21,6 @@ class HostFamily(str, Enum):
     GRAPH = "graph"
 
 
-class SchedulerFamily(str, Enum):
-    STEP_CONTROL = "step_control"
-    BATCH_PACKING = "batch_packing"
-    QUEUE_ADMISSION = "queue_admission"
-
-
 @dataclass
 class HostSignal:
     family: str
@@ -33,22 +30,6 @@ class HostSignal:
     unit: str = "us"
     source: str = "unknown"
     note: Optional[str] = None
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {k: v for k, v in asdict(self).items() if v is not None}
-
-
-@dataclass
-class SchedulerSignal:
-    family: str
-    name: str
-    candidate_us: float
-    count: int
-    baseline_us: Optional[float] = None
-    ratio: Optional[float] = None
-    source: str = "unknown"
-    ranks: List[int] = field(default_factory=list)
-    sample: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return {k: v for k, v in asdict(self).items() if v is not None}
@@ -82,35 +63,73 @@ class Capture:
 
 
 @dataclass
+class TimingAttributionFields:
+    """Exclusive timing buckets shared by normalize and promotion evidence."""
+
+    evidence_mode: str
+    api_submit_us: float = 0.0
+    gpu_execution_us: float = 0.0
+    launch_latency_us: float = 0.0
+    sync_wait_us: float = 0.0
+    graph_launch_us: float = 0.0
+    graph_replay_device_us: float = 0.0
+    cpu_gap_before_us: float = 0.0
+    cpu_gap_after_us: float = 0.0
+    unpaired_event_count: int = 0
+    paired_event_count: int = 0
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_mapping(cls, raw: Dict[str, Any]) -> "TimingAttributionFields":
+        return cls(
+            evidence_mode=str(raw.get("evidence_mode") or "UNKNOWN"),
+            api_submit_us=float(raw.get("api_submit_us") or 0.0),
+            gpu_execution_us=float(raw.get("gpu_execution_us") or 0.0),
+            launch_latency_us=float(raw.get("launch_latency_us") or 0.0),
+            sync_wait_us=float(raw.get("sync_wait_us") or 0.0),
+            graph_launch_us=float(raw.get("graph_launch_us") or 0.0),
+            graph_replay_device_us=float(raw.get("graph_replay_device_us") or 0.0),
+            cpu_gap_before_us=float(raw.get("cpu_gap_before_us") or 0.0),
+            cpu_gap_after_us=float(raw.get("cpu_gap_after_us") or 0.0),
+            unpaired_event_count=int(raw.get("unpaired_event_count") or 0),
+            paired_event_count=int(raw.get("paired_event_count") or 0),
+        )
+
+
+@dataclass
 class ProfileDocument:
     capture: Capture
     host_signals: List[HostSignal] = field(default_factory=list)
-    scheduler_signals: List[SchedulerSignal] = field(default_factory=list)
+    timing_attribution: Optional[TimingAttributionFields] = None
     metrics: List[EngineMetric] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
 
     @property
     def schema_version(self) -> str:
-        return "infiniprofiler-profile-1"
+        return NORMALIZE_SCHEMA
 
     def host(self, family: str) -> Optional[HostSignal]:
         return next((x for x in self.host_signals if x.family == family), None)
 
-    def scheduler(self, family: str) -> Optional[SchedulerSignal]:
-        return next((x for x in self.scheduler_signals if x.family == family), None)
-
     def metric(self, name: str) -> Optional[EngineMetric]:
         return next((x for x in self.metrics if x.name == name), None)
 
+    def timing(self) -> Optional[TimingAttributionFields]:
+        return self.timing_attribution
+
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        payload: Dict[str, Any] = {
             "schema_version": self.schema_version,
             "capture": self.capture.to_dict(),
             "host_signals": [x.to_dict() for x in self.host_signals],
-            "scheduler_signals": [x.to_dict() for x in self.scheduler_signals],
             "metrics": [x.to_dict() for x in self.metrics],
             "warnings": list(self.warnings),
         }
+        if self.timing_attribution is not None:
+            payload["timing_attribution"] = self.timing_attribution.to_dict()
+        return payload
 
     def write_json(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -129,12 +148,11 @@ def safe_ratio(candidate: float, baseline: float) -> Optional[float]:
 def merge_profiles(primary: ProfileDocument, fallback: ProfileDocument) -> ProfileDocument:
     """Merge fallback evidence without replacing primary capture provenance."""
     seen_host = {x.family for x in primary.host_signals}
-    seen_sched = {(x.family, x.name, x.source) for x in primary.scheduler_signals}
     seen_metric = {x.name for x in primary.metrics}
 
     merged = ProfileDocument(capture=primary.capture)
     merged.host_signals.extend(primary.host_signals)
-    merged.scheduler_signals.extend(primary.scheduler_signals)
+    merged.timing_attribution = primary.timing_attribution or fallback.timing_attribution
     merged.metrics.extend(primary.metrics)
     merged.warnings.extend(primary.warnings)
 
@@ -145,10 +163,6 @@ def merge_profiles(primary: ProfileDocument, fallback: ProfileDocument) -> Profi
     for signal in fallback.host_signals:
         if signal.family not in seen_host:
             merged.host_signals.append(signal)
-    for signal in fallback.scheduler_signals:
-        key = (signal.family, signal.name, signal.source)
-        if key not in seen_sched:
-            merged.scheduler_signals.append(signal)
     for metric in fallback.metrics:
         if metric.name not in seen_metric:
             merged.metrics.append(metric)

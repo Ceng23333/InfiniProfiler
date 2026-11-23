@@ -103,7 +103,6 @@ def valid_profile():
                 "source": "hctracer",
             }
         ],
-        "scheduler_signals": [],
         "metrics": [],
         "warnings": [],
     }
@@ -209,24 +208,14 @@ def test_valid_request_v2_is_accepted():
     assert parsed["mechanism_check"].status == "NOT_RUN"
 
 
-def test_profile_v2_rejects_noncanonical_scheduler_signal():
+def test_profile_v2_requires_timing_attribution_buckets():
     document = valid_profile()
-    document["scheduler_signals"].append(
-        {
-            "family": "step_control",
-            "name": "scheduler.step",
-            "candidate_us": 100,
-            "count": 1,
-            "source": "naive-sidecar",
-        }
-    )
+    del document["timing_attribution"]["sync_wait_us"]
 
     with pytest.raises(ContractValidationError) as excinfo:
         validate_profile_v2(document)
 
-    assert any(
-        "must be a canonical InfiniLM span" in error for error in excinfo.value.errors
-    )
+    assert any("sync_wait_us is required" in error for error in excinfo.value.errors)
 
 
 def test_request_v2_rejects_missing_lever_contract():

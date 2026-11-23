@@ -22,16 +22,15 @@ payload later.
 
 ## Path rules
 
-Scheduler evidence uses a different path namespace from runtime evidence:
+Timing and engine-metric paths are separate from graph/source paths:
 
-- `scheduler.step_control` for step loop overhead.
-- `scheduler.batch_packing` for low tokens per iteration or low batch size.
-- `scheduler.queue_admission` for queue growth without equivalent running work.
-- `runtime.host_graph_command` remains the existing host-first path.
+- `runtime.sync_wait` / `runtime.api_submit` / `runtime.host_gap` from matched
+  timing ratios (and host gap when elevated).
+- `engine.batch_packing` / `engine.queue_depth` from metrics alone.
+- `runtime.host_graph_command` remains a broad host-first fallback.
 
-Scheduler paths require exact canonical `infinilm:` spans. Metric-only sidecar
-data can enrich a matched scheduler finding but cannot create one. A sidecar
-stream with no matched window cannot enter a P0 promotion request.
+Ranking never depends on `infinilm:` span contracts. A sidecar stream with no
+matched window cannot enter a P0 promotion request.
 
 Graph paths have the same evidence discipline. A source guard, configured
 provider hit, explicitly paired graph replay timing, or matched rank-tail
