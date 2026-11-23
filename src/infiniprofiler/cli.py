@@ -15,6 +15,7 @@ from .contracts import (
     validate_profile_v2,
     validate_promotion_request_v2,
 )
+from .adapters.dlpti import normalize as normalize_dlpti
 from .adapters.hctracer import normalize as normalize_hctracer
 from .adapters.nsys_sqlite import normalize as normalize_nsys
 from .capture import (
@@ -71,7 +72,7 @@ def build_parser() -> argparse.ArgumentParser:
     normalize.add_argument(
         "--source",
         required=True,
-        choices=["hctracer", "mctracer", "nsys", "naive-sidecar"],
+        choices=["hctracer", "mctracer", "nsys", "dlpti", "naive-sidecar"],
     )
     normalize.add_argument("--input", type=Path, required=True)
     normalize.add_argument("--baseline", type=Path)
@@ -234,6 +235,14 @@ def run_normalize(args: argparse.Namespace) -> int:
             args.input,
             expected_ranks=args.expected_ranks,
             mode=args.mode or "nsys",
+            baseline_path=args.baseline,
+        )
+    elif args.source == "dlpti":
+        profile = normalize_dlpti(
+            args.input,
+            source_name=args.source,
+            mode=args.mode or "attach",
+            pid=args.pid,
             baseline_path=args.baseline,
         )
     else:
