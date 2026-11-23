@@ -52,7 +52,10 @@ def test_sidecar_normalizes_engine_metrics_only(tmp_path):
     assert profile.metric("tokens_per_iteration").ratio == 0.5
     assert profile.metric("queue_depth").ratio == 4.0
     assert any("invalid_jsonl_line" in warning for warning in profile.warnings)
-    assert any("sidecar_span_ignored_not_promotion_evidence" in warning for warning in profile.warnings)
+    assert any(
+        "sidecar_span_provenance_only_not_promotion_evidence" in warning
+        for warning in profile.warnings
+    )
 
 
 def test_unknown_span_is_warning_not_fact(tmp_path):
@@ -85,9 +88,11 @@ def test_unknown_span_is_warning_not_fact(tmp_path):
 
     assert profile.metric("queue_depth").candidate == 4
     assert any(
-        "sidecar_span_ignored_not_promotion_evidence:1:scheduler.foo" in warning
+        "sidecar_span_provenance_only_not_promotion_evidence:1:scheduler.foo" in warning
         for warning in profile.warnings
     )
+    ranges = profile.capture.provenance.get("engine_ranges") or []
+    assert any(item.get("name") == "scheduler.foo" for item in ranges)
 
 
 def test_promotion_request_rejects_missing_sidecar_window(tmp_path):
