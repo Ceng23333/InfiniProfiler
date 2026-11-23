@@ -67,7 +67,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     normalize = subparsers.add_parser("normalize", help="normalize a raw capture")
-    normalize.add_argument("--source", required=True, choices=["hctracer", "naive-sidecar"])
+    normalize.add_argument("--source", required=True, choices=["hctracer", "mctracer", "naive-sidecar"])
     normalize.add_argument("--input", type=Path, required=True)
     normalize.add_argument("--baseline", type=Path)
     normalize.add_argument("--mode", default=None)
@@ -197,9 +197,10 @@ def _parse_exhausted(raw: str) -> list:
 
 
 def run_normalize(args: argparse.Namespace) -> int:
-    if args.source == "hctracer":
+    if args.source in {"hctracer", "mctracer"}:
         profile = normalize_hctracer(
             args.input,
+            source_name=args.source,
             mode=args.mode or "attach",
             pid=args.pid,
             baseline_path=args.baseline,

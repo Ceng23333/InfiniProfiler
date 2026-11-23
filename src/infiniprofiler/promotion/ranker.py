@@ -62,7 +62,7 @@ def primary_wall_ratio(compare: Dict[str, Any]) -> Optional[float]:
             )
             if ratio is not None:
                 return ratio
-    for key in ("ratio", "WALL_DECODE_RATIO", "wall_ratio", "tok_s_ratio"):
+    for key in ("ratio", "WALL_DECODE_RATIO", "wall_ratio", "primary_wall_ratio", "tok_s_ratio"):
         ratio = _number(compare.get(key))
         if ratio is not None:
             return ratio

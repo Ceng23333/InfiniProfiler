@@ -10,6 +10,9 @@ from infiniprofiler.models import (
 )
 from infiniprofiler.promotion.autohelix import promotion_request, write_io_compat
 from infiniprofiler.promotion.ranker import primary_wall_ratio, rank_paths
+
+def test_primary_wall_ratio_reads_unified_gate_payload():
+    assert primary_wall_ratio({"primary_wall_ratio": 0.2345389090571067}) == 0.2345389090571067
 from infiniprofiler.tools.sidecar import normalize
 
 

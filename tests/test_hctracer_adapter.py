@@ -85,6 +85,21 @@ def test_recovers_truncated_chrome_trace(tmp_path):
     assert profile.host("command").candidate == 20
 
 
+def test_mctracer_source_is_preserved(tmp_path):
+    path = write(
+        tmp_path,
+        "candidate.json",
+        trace(
+            [
+                {"ph": "X", "name": "mcLaunchKernel", "dur": 20},
+                {"ph": "X", "name": "mcMemcpyDtoH", "dur": 10},
+            ]
+        ),
+    )
+    profile = normalize(path, source_name="mctracer")
+
+    assert profile.capture.source == "mctracer"
+    assert profile.host("command").candidate == 20
 def test_unrecoverable_trace_has_a_clear_error(tmp_path):
     path = write(tmp_path, "broken.json", "{not-json")
     with pytest.raises(ValueError, match="unrecoverable Chrome trace"):
