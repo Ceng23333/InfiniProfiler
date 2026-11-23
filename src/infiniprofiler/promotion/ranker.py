@@ -14,6 +14,10 @@ HOST_GAP_MIN = 1.5
 TIMING_RATIO_MIN = 1.15
 PACKING_RATIO_MAX = 0.85
 QUEUE_RATIO_MIN = 1.15
+# Matched CU-bucket EngineMetric ratio (candidate/baseline) for kernel.material.
+# Only fires when wall is behind HOST_FIRST_WALL; ratios are never invented.
+KERNEL_MATERIAL_RATIO_MIN = 1.15
+CU_BUCKET_METRIC_PREFIX = "cu_bucket."
 
 
 LEVERS = {
@@ -355,6 +359,45 @@ def rank_paths(
                 "lever": LEVERS["engine.queue_depth"],
             }
         )
+
+    # Priority 4: material CU-bucket metric with matched baseline ratio.
+    if (
+        "kernel.material" not in seen
+        and wall_ratio is not None
+        and wall_ratio < HOST_FIRST_WALL
+    ):
+        best_name = None
+        best_ratio = 0.0
+        for metric in profile.metrics:
+            name = str(metric.name or "")
+            if not name.startswith(CU_BUCKET_METRIC_PREFIX):
+                continue
+            bucket = name[len(CU_BUCKET_METRIC_PREFIX) :]
+            if bucket in ("other", "bf16_copy"):
+                continue
+            if metric.ratio is None:
+                continue
+            ratio = float(metric.ratio)
+            if ratio > best_ratio:
+                best_ratio = ratio
+                best_name = name
+        if best_name is not None and best_ratio >= KERNEL_MATERIAL_RATIO_MIN:
+            seen.add("kernel.material")
+            ranked.append(
+                {
+                    "rank": len(ranked) + 1,
+                    "path_id": "kernel.material",
+                    "priority_rule": 4,
+                    "score": best_ratio,
+                    "reasons": [
+                        f"highest matched CU-bucket metric {best_name} "
+                        f"ratio={best_ratio:.3f} >= {KERNEL_MATERIAL_RATIO_MIN}",
+                        "wall below host-first threshold",
+                    ],
+                    "lever": LEVERS["kernel.material"],
+                    "metric": best_name,
+                }
+            )
 
     # Fallback host-first path for broad runtime/command evidence.
     if host_first_fired(profile, wall_ratio) and "runtime.host_graph_command" not in seen:

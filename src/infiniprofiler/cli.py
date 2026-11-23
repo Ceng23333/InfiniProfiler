@@ -76,7 +76,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     normalize.add_argument("--input", type=Path, required=True)
     normalize.add_argument("--baseline", type=Path)
-    normalize.add_argument("--mode", default=None)
+    normalize.add_argument(
+        "--mode",
+        default=None,
+        help="capture mode; for --source dlpti defaults to wrap (not attach)",
+    )
     normalize.add_argument("--pid", type=int)
     normalize.add_argument("--expected-ranks", type=int, default=1)
     normalize.add_argument("--output", type=Path, required=True)
@@ -241,7 +245,7 @@ def run_normalize(args: argparse.Namespace) -> int:
         profile = normalize_dlpti(
             args.input,
             source_name=args.source,
-            mode=args.mode or "attach",
+            mode=args.mode or "wrap",
             pid=args.pid,
             baseline_path=args.baseline,
         )
