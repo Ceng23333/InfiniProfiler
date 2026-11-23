@@ -131,7 +131,9 @@ def _read_header_fields(path: Path, max_bytes: int = 512_000) -> Dict[str, Any]:
 def load_native_export(path: Path) -> Tuple[Dict[str, Any], List[str]]:
 	"""Load a native DLPTI JSON export with an ``activities`` array.
 
-	Tiny fixtures use full ``json.load``; larger files stream activities.
+	Tiny fixtures use full ``json.load``. Larger files must use
+	``summarize_export_path`` (stream accumulate) — this helper still streams
+	into a list only for callers that need the activity objects in memory.
 	"""
 	warnings: List[str] = []
 	size = path.stat().st_size
@@ -146,15 +148,15 @@ def load_native_export(path: Path) -> Tuple[Dict[str, Any], List[str]]:
 	if '"activities"' not in head:
 		raise ValueError("root is not a DLPTI native export with activities[]")
 	header = _read_header_fields(path)
-	activities = list(iter_activities(path))
+	# Do not materialize multi-GiB activity arrays here.
 	doc = {
 		"profiler_info": header.get("profiler_info") or [],
 		"profile_targets": header.get("profile_targets") or [],
-		"activities": activities,
+		"activities": [],
+		"_stream_path": str(path),
+		"_stream_size_bytes": size,
 	}
-	warnings.append(
-		f"dlpti_streamed_parse: size_bytes={size} activities={len(activities)}"
-	)
+	warnings.append(f"dlpti_streamed_parse: size_bytes={size} (activities not buffered)")
 	return doc, warnings
 
 
@@ -255,6 +257,73 @@ def detect_smoke_fingerprint(
 	return None
 
 
+def _accumulate_activity(
+	raw: Dict[str, Any],
+	totals: Dict[str, float],
+	counts: Dict[str, int],
+	bucket_sums: Dict[str, Dict[str, float]],
+) -> Tuple[int, int]:
+	"""Fold one activity into running totals. Returns (timed_delta, untimed_delta)."""
+	try:
+		kind = int(raw.get("kind"))
+	except (TypeError, ValueError):
+		return 0, 0
+	name = _activity_name(raw)
+	dur = _duration_us(raw)
+	if dur is None:
+		untimed = 1
+		# Count proxy (1 us per record) so empty-duration structural
+		# records still contribute comparable family mass.
+		dur = 1.0
+		proxy = True
+		timed = 0
+	else:
+		timed = 1
+		untimed = 0
+		proxy = False
+
+	if kind == KIND_DRIVER_API:
+		totals["driver"] += dur
+		totals["api"] += dur
+		counts["driver"] += 1
+		counts["api"] += 1
+		if LAUNCH_RE.search(name):
+			totals["command"] += dur
+			counts["command"] += 1
+	elif kind == KIND_RUNTIME_API:
+		totals["runtime"] += dur
+		totals["api"] += dur
+		counts["runtime"] += 1
+		counts["api"] += 1
+		if LAUNCH_RE.search(name):
+			totals["command"] += dur
+			counts["command"] += 1
+	elif kind == KIND_COMMAND:
+		totals["command"] += dur
+		counts["command"] += 1
+	elif kind in GRAPH_KINDS or GRAPH_NAME_RE.search(name):
+		totals["graph"] += dur
+		counts["graph"] += 1
+	elif kind in MEMCPY_KINDS or "memcpy" in name.lower() or "memset" in name.lower():
+		totals["memcpy"] += dur
+		counts["memcpy"] += 1
+	elif kind in KERNEL_KINDS:
+		totals["kernel"] += dur
+		counts["kernel"] += 1
+		b = bucket_for(name)
+		bucket_sums.setdefault(b, {"sum_us": 0.0, "count": 0.0})
+		bucket_sums[b]["sum_us"] += dur
+		bucket_sums[b]["count"] += 1.0
+	elif kind == KIND_FLUSH:
+		# Flush is device sync overhead; fold into gap numerator later.
+		totals["gap"] += dur
+		counts["gap"] += 1
+	elif proxy:
+		# Ignore untimed metadata (device/context/stream) for host families.
+		pass
+	return timed, untimed
+
+
 def extract_host_totals_us(
 	doc: Dict[str, Any],
 ) -> Tuple[Dict[str, float], Dict[str, Any], Dict[str, Dict[str, float]]]:
@@ -272,64 +341,19 @@ def extract_host_totals_us(
 	bucket_sums = empty_bucket_map()
 	timed = 0
 	untimed = 0
-	for raw in doc.get("activities") or []:
+
+	stream_path = doc.get("_stream_path")
+	if stream_path:
+		activity_iter: Any = iter_activities(Path(str(stream_path)))
+	else:
+		activity_iter = doc.get("activities") or []
+
+	for raw in activity_iter:
 		if not isinstance(raw, dict):
 			continue
-		try:
-			kind = int(raw.get("kind"))
-		except (TypeError, ValueError):
-			continue
-		name = _activity_name(raw)
-		dur = _duration_us(raw)
-		if dur is None:
-			untimed += 1
-			# Count proxy (1 us per record) so empty-duration structural
-			# records still contribute comparable family mass.
-			dur = 1.0
-			proxy = True
-		else:
-			timed += 1
-			proxy = False
-
-		if kind == KIND_DRIVER_API:
-			totals["driver"] += dur
-			totals["api"] += dur
-			counts["driver"] += 1
-			counts["api"] += 1
-			if LAUNCH_RE.search(name):
-				totals["command"] += dur
-				counts["command"] += 1
-		elif kind == KIND_RUNTIME_API:
-			totals["runtime"] += dur
-			totals["api"] += dur
-			counts["runtime"] += 1
-			counts["api"] += 1
-			if LAUNCH_RE.search(name):
-				totals["command"] += dur
-				counts["command"] += 1
-		elif kind == KIND_COMMAND:
-			totals["command"] += dur
-			counts["command"] += 1
-		elif kind in GRAPH_KINDS or GRAPH_NAME_RE.search(name):
-			totals["graph"] += dur
-			counts["graph"] += 1
-		elif kind in MEMCPY_KINDS or "memcpy" in name.lower() or "memset" in name.lower():
-			totals["memcpy"] += dur
-			counts["memcpy"] += 1
-		elif kind in KERNEL_KINDS:
-			totals["kernel"] += dur
-			counts["kernel"] += 1
-			b = bucket_for(name)
-			bucket_sums.setdefault(b, {"sum_us": 0.0, "count": 0.0})
-			bucket_sums[b]["sum_us"] += dur
-			bucket_sums[b]["count"] += 1.0
-		elif kind == KIND_FLUSH:
-			# Flush is device sync overhead; fold into gap numerator later.
-			totals["gap"] += dur
-			counts["gap"] += 1
-		elif proxy:
-			# Ignore untimed metadata (device/context/stream) for host families.
-			pass
+		dt, du = _accumulate_activity(raw, totals, counts, bucket_sums)
+		timed += dt
+		untimed += du
 
 	busy = totals["kernel"] + totals["memcpy"]
 	submitted = totals["api"] + totals["command"]
