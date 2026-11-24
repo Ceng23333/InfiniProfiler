@@ -495,7 +495,6 @@ def normalize(
 	return ProfileDocument(
 		capture=capture,
 		host_signals=_host_signals(totals, baseline_totals),
-		scheduler_signals=[],
 		metrics=_cu_bucket_metrics(bucket_sums, baseline_buckets, emit=emit_cu),
 		warnings=warnings,
 	)

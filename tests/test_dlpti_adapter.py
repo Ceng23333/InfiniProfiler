@@ -26,7 +26,7 @@ def test_fixture_preserves_dlpti_source_and_host_families():
 
     assert profile.capture.source == "dlpti"
     assert profile.capture.mode == "wrap"
-    assert profile.scheduler_signals == []
+    assert not hasattr(profile, "scheduler_signals")
     assert any("no_scheduler_annotations" in w for w in profile.warnings)
     assert profile.host("driver") is not None
     assert profile.host("runtime") is not None
