@@ -136,3 +136,52 @@ def test_unrecoverable_trace_has_a_clear_error(tmp_path):
     path = write(tmp_path, "broken.json", "{not-json")
     with pytest.raises(ValueError, match="unrecoverable Chrome trace"):
         normalize(path)
+
+
+def test_mctracer_normalize_exposes_graph_host_signal(tmp_path):
+    path = write(
+        tmp_path,
+        "mctracer.json",
+        trace(
+            [
+                {
+                    "name": "mcThreadExchangeStreamCaptureMode",
+                    "ph": "X",
+                    "ts": 0,
+                    "dur": 100,
+                    "pid": 1,
+                    "tid": 8,
+                    "args": {"co_id": 1, "ret": 0},
+                },
+                {
+                    "name": "Launch",
+                    "ph": "s",
+                    "cat": "Launch",
+                    "ts": 200,
+                    "pid": 1,
+                    "tid": 201,
+                    "id": 7,
+                },
+                {
+                    "name": "Launch",
+                    "ph": "f",
+                    "cat": "Launch",
+                    "ts": 500,
+                    "pid": 3,
+                    "tid": 0,
+                    "id": 7,
+                },
+            ]
+        ),
+    )
+    profile = normalize(path, source_name="mctracer")
+
+    assert profile.host("graph") is not None
+    assert profile.host("graph").candidate > 0
+    assert profile.timing_attribution is not None
+    assert profile.timing_attribution.graph_launch_us > 0
+    assert profile.timing_attribution.graph_replay_device_us > 0
+    assert (
+        profile.timing_attribution.evidence_mode
+        == "EXCLUSIVE_UNION_WITH_EXPLICIT_CORRELATION"
+    )

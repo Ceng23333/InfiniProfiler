@@ -216,3 +216,87 @@ def test_streaming_reader_processes_large_trace_without_full_list(tmp_path):
         if item is not None:
             count += 1
     assert count == 20_000
+
+
+def test_metax_launch_flows_become_paired_graph_timing(tmp_path):
+    """MetaX ENABLE_GRAPH shape: capture toggle + Launch s/f across host/device pids."""
+    path = trace_file(
+        tmp_path,
+        "metax_launch.json",
+        [
+            {
+                "name": "mcThreadExchangeStreamCaptureMode",
+                "ph": "X",
+                "ts": 1000,
+                "dur": 50,
+                "pid": 1,
+                "tid": 8,
+                "args": {"co_id": 10, "ret": 0},
+            },
+            {
+                "name": "Launch",
+                "ph": "s",
+                "cat": "Launch",
+                "ts": 2000,
+                "pid": 1,
+                "tid": 201,
+                "id": 42,
+            },
+            {
+                "name": "Launch",
+                "ph": "f",
+                "cat": "Launch",
+                "ts": 2500,
+                "pid": 259,
+                "tid": 0,
+                "id": 42,
+            },
+        ],
+    )
+    timeline = attribute_trace(path, database_path=tmp_path / "metax_launch.db")
+
+    assert timeline.graph_launch_us > 0
+    assert timeline.graph_replay_device_us > 0
+    assert timeline.evidence_mode == "EXCLUSIVE_UNION_WITH_EXPLICIT_CORRELATION"
+    assert timeline.correlation_status == "EXPLICIT"
+    assert timeline.paired_event_count >= 1
+    assert timeline.host_totals_us["graph"] > 0
+
+
+def test_metax_co_id_pairs_host_submit_and_device_memset(tmp_path):
+    path = trace_file(
+        tmp_path,
+        "metax_coid.json",
+        [
+            {
+                "name": "mcMemsetAsync",
+                "ph": "X",
+                "ts": 100,
+                "dur": 20,
+                "pid": 1,
+                "tid": 158,
+                "args": {"co_id": 6957, "ret": 0},
+            },
+            {
+                "name": "memset",
+                "ph": "X",
+                "cat": "4",
+                "ts": 150,
+                "dur": 80,
+                "pid": 514,
+                "tid": 1024,
+                "args": {
+                    "co_id": 6957,
+                    "device_id": 2,
+                    "stream_id": 4,
+                    "bytes": 262144,
+                },
+            },
+        ],
+    )
+    timeline = attribute_trace(path, database_path=tmp_path / "metax_coid.db")
+
+    assert timeline.evidence_mode == "EXCLUSIVE_UNION_WITH_EXPLICIT_CORRELATION"
+    assert timeline.paired_event_count == 1
+    assert timeline.launch_latency_us == 30
+    assert timeline.gpu_execution_us == 80

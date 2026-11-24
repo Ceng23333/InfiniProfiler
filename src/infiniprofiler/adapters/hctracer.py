@@ -21,7 +21,12 @@ API_RE = re.compile(r"^(hc|mc|cuda|cu)[A-Z]", re.IGNORECASE)
 LAUNCH_RE = re.compile(r"launch", re.IGNORECASE)
 KERNEL_RE = re.compile(r"kernel|gemm|attention|moe|rope|norm", re.IGNORECASE)
 MEMCPY_RE = re.compile(r"memcpy|memset|htod|dtoh", re.IGNORECASE)
-GRAPH_RE = re.compile(r"graph", re.IGNORECASE)
+# MetaX mcTracer uses capture-mode toggles instead of *GraphLaunch* names.
+GRAPH_RE = re.compile(
+    r"graph|ThreadExchangeStreamCaptureMode|StreamBeginCapture|StreamEndCapture|"
+    r"GraphLaunch|GraphInstantiate|GraphExec",
+    re.IGNORECASE,
+)
 SCHEDULER_RE = re.compile(
     r"(scheduler|schedule|batch|step|forward|sample|admission)", re.IGNORECASE
 )

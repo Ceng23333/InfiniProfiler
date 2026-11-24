@@ -233,6 +233,25 @@ def test_insufficient_evidence_cites_timing_not_spans():
     assert "timing" in result["ranked"][0]["reasons"][0]
 
 
+def test_ranker_selects_graph_path_from_metax_paired_timing():
+    profile = ProfileDocument(
+        capture=Capture(source="mctracer"),
+        timing_attribution=TimingAttributionFields(
+            evidence_mode="EXCLUSIVE_UNION_WITH_EXPLICIT_CORRELATION",
+            graph_launch_us=120.0,
+            graph_replay_device_us=4500.0,
+            api_submit_us=200.0,
+            gpu_execution_us=4500.0,
+            paired_event_count=10,
+            unpaired_event_count=0,
+        ),
+    )
+    result = rank_paths(profile, wall_ratio=0.45)
+
+    assert result["top_path"] == "graph.replay_exclusive"
+    assert result["top_path"] != "diagnosis.insufficient_evidence"
+
+
 def test_promotion_request_stops_before_autohelix_applies_a_lever(tmp_path):
     profile = ProfileDocument(capture=Capture(source="hctracer"))
     profile.metrics.append(

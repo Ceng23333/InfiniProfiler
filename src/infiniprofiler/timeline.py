@@ -214,6 +214,7 @@ def _correlation(event: Mapping[str, Any]) -> Optional[str]:
         "correlationID",
         "external_id",
         "externalId",
+        "co_id",
         "id",
     )
     for source in candidates:
@@ -223,23 +224,102 @@ def _correlation(event: Mapping[str, Any]) -> Optional[str]:
     return None
 
 
+def _event_args(event: Mapping[str, Any]) -> Dict[str, Any]:
+    args = event.get("args")
+    return args if isinstance(args, dict) else {}
+
+
 def _is_host(event: Mapping[str, Any], name: str) -> bool:
     category = str(event.get("cat") or "").lower()
+    args = _event_args(event)
+    if args.get("_ip_role") == "host":
+        return True
+    if args.get("_ip_role") == "device":
+        return False
     return API_RE.search(name) is not None or category in ("cpu", "host", "runtime", "driver")
 
 
 def _is_device(event: Mapping[str, Any], name: str) -> bool:
     category = str(event.get("cat") or "").lower()
+    args = _event_args(event)
+    if args.get("_ip_role") == "device":
+        return True
+    if args.get("_ip_role") == "host":
+        return False
     if category in ("cpu", "host", "runtime", "driver"):
         return False
+    # Host runtime/driver APIs (mcMemsetAsync, cudaMemcpy, …) are submits.
+    if API_RE.search(name):
+        return False
+    if category == "launch":
+        return True
+    if category in ("kernel", "gpu", "device", "memcpy", "memset"):
+        return True
+    # MetaX device memcpy/memset channels use numeric cats with device-like args.
+    if category.isdigit() and any(
+        key in args for key in ("device_id", "stream_id", "deviceId", "streamId")
+    ):
+        return True
+    return KERNEL_RE.search(name) is not None or MEMCPY_RE.search(name) is not None
+
+
+def _is_metax_launch_flow(event: Mapping[str, Any]) -> bool:
     return (
-        category in ("kernel", "gpu", "device", "memcpy", "memset")
-        or KERNEL_RE.search(name) is not None
-        or MEMCPY_RE.search(name) is not None
+        str(event.get("name") or "") == "Launch"
+        and str(event.get("cat") or "") == "Launch"
+        and event.get("ph") in ("s", "f")
+        and event.get("id") is not None
     )
 
 
-def classify_event(event: Mapping[str, Any]) -> Optional[str]:
+def materialize_metax_launch_flow(
+    start_event: Mapping[str, Any],
+    finish_event: Mapping[str, Any],
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """Turn a Chrome Launch s/f pair into correlated host+device complete events."""
+    flow_id = start_event.get("id")
+    correlation = str(flow_id)
+    start_ts = float(start_event.get("ts") or 0.0)
+    end_ts = float(finish_event.get("ts") or start_ts)
+    device_dur = max(1.0, end_ts - start_ts)
+    host = {
+        "name": "Launch",
+        "ph": "X",
+        "cat": "Launch",
+        "ts": start_ts,
+        "dur": 1.0,
+        "pid": start_event.get("pid"),
+        "tid": start_event.get("tid"),
+        "args": {
+            "correlation_id": correlation,
+            "_ip_role": "host",
+            "_ip_metax_launch_flow": True,
+        },
+    }
+    device = {
+        "name": "Launch",
+        "ph": "X",
+        "cat": "Launch",
+        "ts": start_ts,
+        "dur": device_dur,
+        "pid": finish_event.get("pid"),
+        "tid": finish_event.get("tid"),
+        "args": {
+            "correlation_id": correlation,
+            "_ip_role": "device",
+            "_ip_metax_launch_flow": True,
+            "device_id": finish_event.get("pid"),
+            "stream_id": finish_event.get("tid"),
+        },
+    }
+    return host, device
+
+
+def classify_event(
+    event: Mapping[str, Any],
+    *,
+    metax_graph_context: bool = False,
+) -> Optional[str]:
     name = str(event.get("name") or "")
     if event.get("ph") != "X":
         return None
@@ -248,9 +328,15 @@ def classify_event(event: Mapping[str, Any]) -> Optional[str]:
             return None
     except (TypeError, ValueError):
         return None
-    lowered = name.lower()
+    args = _event_args(event)
+    category = str(event.get("cat") or "").lower()
     if SYNC_RE.search(name):
         return "sync"
+    if args.get("_ip_metax_launch_flow") or category == "launch":
+        if _is_device(event, name):
+            return "graph_device" if metax_graph_context else "gpu_execution"
+        if _is_host(event, name) or LAUNCH_NAME_RE.search(name):
+            return "graph_launch" if metax_graph_context else "api_submit"
     if GRAPH_RE.search(name) and _is_device(event, name):
         return "graph_device"
     if GRAPH_RE.search(name) and (_is_host(event, name) or LAUNCH_NAME_RE.search(name)):
@@ -353,11 +439,13 @@ def _paired_latencies(connection: sqlite3.Connection, *, explicit_only: bool) ->
     for gpu_id, pid, gpu_start, gpu_end, correlation in gpu_cursor:
         paired_row = None
         if correlation is not None:
+            # MetaX host submit and device work use different Chrome pids; match on
+            # explicit correlation (flow id / co_id) across processes.
             paired_row = connection.execute(
                 "SELECT end_us, start_us FROM events "
-                "WHERE category IN ('api_submit', 'graph_launch') AND pid = ? AND correlation_id = ? "
+                "WHERE category IN ('api_submit', 'graph_launch') AND correlation_id = ? "
                 "ORDER BY ABS(? - end_us), end_us DESC LIMIT 1",
-                    (pid, correlation, float(gpu_start)),
+                (correlation, float(gpu_start)),
             ).fetchone()
         if paired_row is None and not explicit_only:
             paired_row = connection.execute(
@@ -372,9 +460,9 @@ def _paired_latencies(connection: sqlite3.Connection, *, explicit_only: bool) ->
         submit_end = float(paired_row[0])
         next_row = connection.execute(
             "SELECT start_us FROM events "
-            "WHERE category = 'api_submit' AND pid = ? AND start_us >= ? "
+            "WHERE category = 'api_submit' AND start_us >= ? "
             "ORDER BY start_us, id LIMIT 1",
-            (pid, float(gpu_end)),
+            (float(gpu_end),),
         ).fetchone()
         launch_total += max(0.0, float(gpu_start) - submit_end)
         if next_row is not None:
@@ -385,14 +473,13 @@ def _paired_latencies(connection: sqlite3.Connection, *, explicit_only: bool) ->
 
 def _gpu_interval_total_filtered(
     connection: sqlite3.Connection,
-    pid: int,
     correlation_id: str,
 ) -> float:
     cursor = connection.execute(
         "SELECT start_us, end_us FROM events "
         "WHERE category IN ('gpu_execution', 'graph_device') "
-        "AND pid = ? AND correlation_id = ? ORDER BY start_us, end_us",
-        (pid, correlation_id),
+        "AND correlation_id = ? ORDER BY start_us, end_us",
+        (correlation_id,),
     )
     active_start: Optional[float] = None
     active_end = 0.0
@@ -418,17 +505,17 @@ def _gpu_interval_total_filtered(
 
 def _graph_replay_boundaries(connection: sqlite3.Connection) -> List[Dict[str, Any]]:
     launches = connection.execute(
-        "SELECT pid, correlation_id, MIN(start_us), MAX(end_us), COUNT(*) "
+        "SELECT correlation_id, MIN(pid), MIN(start_us), MAX(end_us), COUNT(*) "
         "FROM events WHERE category = 'graph_launch' AND correlation_id IS NOT NULL "
-        "GROUP BY pid, correlation_id ORDER BY MIN(start_us), pid, correlation_id"
+        "GROUP BY correlation_id ORDER BY MIN(start_us), correlation_id"
     ).fetchall()
     boundaries: List[Dict[str, Any]] = []
-    for pid, correlation, start, end, launch_count in launches:
+    for correlation, pid, start, end, launch_count in launches:
         devices = connection.execute(
             "SELECT start_us, end_us FROM events "
-            "WHERE category = 'graph_device' AND pid = ? AND correlation_id = ? "
+            "WHERE category = 'graph_device' AND correlation_id = ? "
             "ORDER BY start_us, end_us",
-            (pid, correlation),
+            (correlation,),
         ).fetchall()
         if not devices:
             continue
@@ -438,13 +525,13 @@ def _graph_replay_boundaries(connection: sqlite3.Connection) -> List[Dict[str, A
         boundary_end = max(float(end), device_end)
         boundaries.append(
             {
-                "pid": int(pid),
+                "pid": int(pid) if pid is not None else None,
                 "correlation_id": str(correlation),
                 "launch_count": int(launch_count),
                 "device_event_count": len(devices),
                 "start_us": boundary_start,
                 "end_us": boundary_end,
-                "gpu_busy_us": _gpu_interval_total_filtered(connection, int(pid), str(correlation)),
+                "gpu_busy_us": _gpu_interval_total_filtered(connection, str(correlation)),
             }
         )
     return boundaries
@@ -497,6 +584,70 @@ def attribute_trace(
         "memcpy": 0.0,
         "graph": 0.0,
     }
+    pending_launch_starts: Dict[Any, Mapping[str, Any]] = {}
+    synthetic_launch_pairs: List[Tuple[Dict[str, Any], Dict[str, Any]]] = []
+    has_metax_graph_signal = False
+
+    def _accumulate_host_totals(name: str, duration: float, event: Mapping[str, Any]) -> None:
+        lowered = name.lower()
+        cat = str(event.get("cat") or "").lower()
+        if GRAPH_RE.search(name):
+            host_totals["graph"] += duration
+        if lowered.find("launch") >= 0 or cat == "launch":
+            host_totals["command"] += duration
+        if API_RE.search(name):
+            host_totals["api"] += duration
+            host_totals["driver"] += duration
+            if lowered.find("launch") < 0:
+                host_totals["runtime"] += duration
+        if KERNEL_RE.search(name):
+            host_totals["kernel"] += duration
+        if MEMCPY_RE.search(name):
+            host_totals["memcpy"] += duration
+
+    def _ingest_event(event: Mapping[str, Any], *, metax_graph_context: bool) -> None:
+        nonlocal classified
+        name = str(event.get("name") or "")
+        duration = _number(event, ("dur", "duration"))
+        start = _number(event, ("ts", "start", "start_us"))
+        if duration is None or duration <= 0 or start is None:
+            return
+        category = classify_event(event, metax_graph_context=metax_graph_context)
+        pid = _number(event, ("pid",))
+        tid = _number(event, ("tid",))
+        args_map = _event_args(event)
+        stream = _first_string(args_map, ("stream", "stream_id", "streamId"))
+        correlation = _correlation(event)
+
+        if SCHEDULER_RE.search(name) and name not in optional_markers:
+            optional_markers.append(name)
+
+        _accumulate_host_totals(name, float(duration), event)
+
+        if category is None:
+            return
+        classified += 1
+        is_graph = 1 if (
+            GRAPH_RE.search(name)
+            or args_map.get("_ip_metax_launch_flow")
+            or category in ("graph_launch", "graph_device")
+        ) else 0
+        connection.execute(
+            "INSERT INTO events(category, start_us, end_us, duration_us, pid, tid, stream, "
+            "correlation_id, name, is_graph) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                category,
+                float(start),
+                float(start + duration),
+                float(duration),
+                int(pid) if pid is not None else None,
+                int(tid) if tid is not None else None,
+                stream,
+                correlation,
+                name,
+                is_graph,
+            ),
+        )
 
     for stream_item, new_warnings in stream_chrome_events(input_path, chunk_size=chunk_size):
         if stream_item is None:
@@ -510,55 +661,26 @@ def attribute_trace(
             if warning not in warnings:
                 warnings.append(warning)
         name = str(event.get("name") or "")
-        duration = _number(event, ("dur", "duration"))
-        start = _number(event, ("ts", "start", "start_us"))
-        if duration is None or duration <= 0 or start is None:
-            continue
-        category = classify_event(event)
-        pid = _number(event, ("pid",))
-        tid = _number(event, ("tid",))
-        args = event.get("args")
-        args_map = args if isinstance(args, dict) else {}
-        stream = _first_string(args_map, ("stream", "stream_id", "streamId"))
-        correlation = _correlation(event)
-        lowered = name.lower()
-
-        if SCHEDULER_RE.search(name) and name not in optional_markers:
-            optional_markers.append(name)
-
         if GRAPH_RE.search(name):
-            host_totals["graph"] += duration
-        if lowered.find("launch") >= 0:
-            host_totals["command"] += duration
-        if API_RE.search(name):
-            host_totals["api"] += duration
-            host_totals["driver"] += duration
-            if lowered.find("launch") < 0:
-                host_totals["runtime"] += duration
-        if KERNEL_RE.search(name):
-            host_totals["kernel"] += duration
-        if MEMCPY_RE.search(name):
-            host_totals["memcpy"] += duration
+            has_metax_graph_signal = True
 
-        if category is None:
+        if _is_metax_launch_flow(event):
+            flow_id = event.get("id")
+            if event.get("ph") == "s":
+                pending_launch_starts[flow_id] = event
+            else:
+                start_event = pending_launch_starts.pop(flow_id, None)
+                if start_event is not None:
+                    synthetic_launch_pairs.append(
+                        materialize_metax_launch_flow(start_event, event)
+                    )
             continue
-        classified += 1
-        connection.execute(
-            "INSERT INTO events(category, start_us, end_us, duration_us, pid, tid, stream, correlation_id, name, is_graph) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                category,
-                float(start),
-                float(start + duration),
-                float(duration),
-                int(pid) if pid is not None else None,
-                int(tid) if tid is not None else None,
-                stream,
-                correlation,
-                name,
-                1 if GRAPH_RE.search(name) else 0,
-            ),
-        )
+
+        _ingest_event(event, metax_graph_context=has_metax_graph_signal)
+
+    for host_event, device_event in synthetic_launch_pairs:
+        _ingest_event(host_event, metax_graph_context=has_metax_graph_signal)
+        _ingest_event(device_event, metax_graph_context=has_metax_graph_signal)
 
     connection.commit()
     trace_bounds = connection.execute("SELECT MIN(start_us), MAX(end_us) FROM events").fetchone()
