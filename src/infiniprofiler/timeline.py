@@ -275,14 +275,16 @@ def _is_metax_launch_flow(event: Mapping[str, Any]) -> bool:
 def materialize_metax_launch_flow(
     start_event: Mapping[str, Any],
     finish_event: Mapping[str, Any],
-) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-    """Turn a Chrome Launch s/f pair into correlated host+device complete events."""
+) -> Dict[str, Any]:
+    """Turn a Chrome Launch s/f pair into a correlated host complete event.
+
+    The s/f pair only carries API flow timing. No device duration is
+    synthesized from it; the real device work must come from device events.
+    """
     flow_id = start_event.get("id")
     correlation = str(flow_id)
     start_ts = float(start_event.get("ts") or 0.0)
-    end_ts = float(finish_event.get("ts") or start_ts)
-    device_dur = max(1.0, end_ts - start_ts)
-    host = {
+    return {
         "name": "Launch",
         "ph": "X",
         "cat": "Launch",
@@ -294,25 +296,9 @@ def materialize_metax_launch_flow(
             "correlation_id": correlation,
             "_ip_role": "host",
             "_ip_metax_launch_flow": True,
+            "_ip_launch_flow_finish_ts": finish_event.get("ts"),
         },
     }
-    device = {
-        "name": "Launch",
-        "ph": "X",
-        "cat": "Launch",
-        "ts": start_ts,
-        "dur": device_dur,
-        "pid": finish_event.get("pid"),
-        "tid": finish_event.get("tid"),
-        "args": {
-            "correlation_id": correlation,
-            "_ip_role": "device",
-            "_ip_metax_launch_flow": True,
-            "device_id": finish_event.get("pid"),
-            "stream_id": finish_event.get("tid"),
-        },
-    }
-    return host, device
 
 
 def classify_event(
@@ -585,7 +571,8 @@ def attribute_trace(
         "graph": 0.0,
     }
     pending_launch_starts: Dict[Any, Mapping[str, Any]] = {}
-    synthetic_launch_pairs: List[Tuple[Dict[str, Any], Dict[str, Any]]] = []
+    launch_flow_pairs = 0
+    synthetic_launch_pairs: List[Dict[str, Any]] = []
     has_metax_graph_signal = False
 
     def _accumulate_host_totals(name: str, duration: float, event: Mapping[str, Any]) -> None:
@@ -612,6 +599,10 @@ def attribute_trace(
         start = _number(event, ("ts", "start", "start_us"))
         if duration is None or duration <= 0 or start is None:
             return
+        # mcTracer emits epoch-ns timestamps and ns durations; normalize to us.
+        if start >= 1e15:
+            duration = duration * 0.001
+            start = start * 0.001
         category = classify_event(event, metax_graph_context=metax_graph_context)
         pid = _number(event, ("pid",))
         tid = _number(event, ("tid",))
@@ -674,13 +665,15 @@ def attribute_trace(
                     synthetic_launch_pairs.append(
                         materialize_metax_launch_flow(start_event, event)
                     )
+                    launch_flow_pairs += 1
             continue
 
         _ingest_event(event, metax_graph_context=has_metax_graph_signal)
 
-    for host_event, device_event in synthetic_launch_pairs:
+    for host_event in synthetic_launch_pairs:
         _ingest_event(host_event, metax_graph_context=has_metax_graph_signal)
-        _ingest_event(device_event, metax_graph_context=has_metax_graph_signal)
+    if launch_flow_pairs:
+        warnings.append("launch_flow_device_duration_not_synthetic")
 
     connection.commit()
     trace_bounds = connection.execute("SELECT MIN(start_us), MAX(end_us) FROM events").fetchone()

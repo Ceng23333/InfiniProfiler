@@ -134,6 +134,17 @@ def build_parser() -> argparse.ArgumentParser:
     merge.add_argument("--capture-dir", type=Path, required=True)
     merge.add_argument("--output", type=Path)
 
+    gate = subparsers.add_parser(
+        "mctracer-gate",
+        help="semantic mcTracer gate: coverage, gaps, candidate/baseline fields",
+    )
+    gate.add_argument("--candidate", type=Path, required=True)
+    gate.add_argument("--baseline", type=Path, required=True)
+    gate.add_argument("--client-window-json", type=Path)
+    gate.add_argument("--candidate-client-window-json", type=Path)
+    gate.add_argument("--baseline-client-window-json", type=Path)
+    gate.add_argument("--output", type=Path, required=True)
+
     attribute = subparsers.add_parser(
         "attribute-trace",
         help="stream one trace and emit exclusive timing attribution",
@@ -527,6 +538,39 @@ def run_evaluate_mechanism(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_mctracer_gate(args: argparse.Namespace) -> int:
+    from .adapters.mctracer import analyze_trace, compare_gate, load_client_window
+
+    candidate = analyze_trace(
+        args.candidate,
+        client_window_s=load_client_window(
+            args.candidate_client_window_json or args.client_window_json
+        ),
+    )
+    baseline = analyze_trace(
+        args.baseline,
+        client_window_s=load_client_window(
+            args.baseline_client_window_json or args.client_window_json
+        ),
+    )
+    gate = compare_gate(candidate, baseline)
+    result = {
+        "schema_version": gate["schema_version"],
+        "candidate": candidate,
+        "baseline": baseline,
+        "gate": gate,
+    }
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+    print(f"wrote {args.output}")
+    print(
+        f"overall candidate={gate['overall']['candidate_total_us']}us "
+        f"baseline={gate['overall']['baseline_total_us']}us "
+        f"gap_ratio={gate['overall']['gap_ratio']}"
+    )
+    return 0
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -540,6 +584,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "compare-capture-manifests": run_compare_capture,
         "merge-capture": run_merge_capture,
         "attribute-trace": run_attribute_trace,
+        "mctracer-gate": run_mctracer_gate,
         "rank-capture": run_rank_capture,
         "build-source-map": run_build_source_map,
         "promotion-request-v2": run_request_v2,
